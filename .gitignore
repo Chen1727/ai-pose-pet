@@ -1,0 +1,35 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 工具产物
+*.part
+download_failed.txt
+verify_failed.txt
+
+# 本地/编辑器
+.workbuddy/
+.idea/
+.vscode/
+node_modules/
+.wrangler/
+.tanstack/
+
+# 构建产物与原始 PNG 备份（不上传 Git）
+dist/
+data/pet-uploads/
+data/pet-uploads.json
+*.env
+backups/
+img/costume/*.png
+img/portrait/*.png
+img/depth/*.png
+thumbs/depth/*.jpg

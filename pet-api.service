@@ -1,0 +1,21 @@
+[Unit]
+Description=Pet gallery upload API
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/ai-pose-pet
+EnvironmentFile=/etc/ai-pose-pet.env
+ExecStart=/usr/bin/node /var/www/ai-pose-pet/server.mjs
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/ai-pose-pet
+Environment=DATA_DIR=/var/lib/ai-pose-pet
+
+[Install]
+WantedBy=multi-user.target
