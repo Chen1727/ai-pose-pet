@@ -38,6 +38,7 @@ function GuidePage() {
       <Section title="图片来源与版权说明" className="@lg/section:grid-cols-1">
         <div className="space-y-2.5 rounded-2xl bg-background p-4 text-xs leading-relaxed text-muted-foreground">
           <p><strong className="text-foreground">宠物图库：</strong>猫咪、狗狗和人宠互动图片仅用于参考和创作，不因收录到本项目而改变图片原有的版权和授权条件。</p>
+          <p><strong className="text-foreground">项目自有图片：</strong>项目维护者自己生成并拥有必要授权的图片，采用 <a className="underline hover:text-foreground" href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a> 授权，使用时请保留署名。</p>
           <p><strong className="text-foreground">使用边界：</strong>使用任何参考图前，请自行确认图片来源、授权范围和发布平台规则。</p>
         </div>
       </Section>

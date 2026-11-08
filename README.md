@@ -55,7 +55,9 @@ start.bat            Windows 一键启动脚本
 
 ## 开源协议
 
-源代码使用 [MIT License](LICENSE)。图库图片和第三方参考数据不因本项目使用 MIT License 而改变其原有版权和授权条件。
+网站代码使用 [MIT License](LICENSE)。
+
+项目维护者自己生成并且拥有必要授权的图片，使用 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) 授权，使用时请保留署名。用户上传图片和第三方参考数据不因本项目使用上述协议而改变其原有版权和授权条件。
 
 ## 项目地址
 

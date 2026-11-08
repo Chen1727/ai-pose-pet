@@ -24,7 +24,10 @@ Scope
 -----
 
 This license applies to the source code and configuration in this repository.
-Images, uploaded files, and third-party reference data retain the copyright
-and license terms of their respective owners. They are not relicensed by this
-MIT notice. Review the source and uploader permissions before redistributing
-any image or dataset.
+Images are not covered by this MIT license. Self-generated images for which
+the project maintainer owns the necessary rights are licensed under the
+Creative Commons Attribution 4.0 International License (CC BY 4.0):
+https://creativecommons.org/licenses/by/4.0/
+
+Uploaded files and third-party reference data retain the copyright and license
+terms of their respective owners. They are not relicensed by this notice.
