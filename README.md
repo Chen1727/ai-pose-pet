@@ -29,13 +29,7 @@ pnpm dev
 
 浏览器打开 `http://localhost:5173`。
 
-需要使用网页图库管理和上传功能时，先复制 `.env.example` 为 `.env`，设置管理员密码和会话密钥，再启动 API：
-
-```powershell
-pnpm api
-```
-
-Windows 用户也可以双击项目根目录的 `start.bat`，脚本会检查依赖并启动前端和 API。
+Windows 用户也可以双击项目根目录的 `start.bat`，脚本会检查依赖并启动本地服务。
 
 ## 构建
 
@@ -70,7 +64,7 @@ src/                 页面、组件、合成台和状态管理
 src/routes/          图库、合成台、设置和说明页面
 data/pets.json       宠物图库初始记录
 img/pets/            宠物图库初始图片
-server.mjs           管理员登录和图片上传 API
+server.mjs           本地服务入口
 start.bat            Windows 一键启动脚本
 nginx-pet.conf       Nginx 部署示例
 pet-api.service      API systemd 服务示例
