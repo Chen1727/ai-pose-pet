@@ -149,6 +149,30 @@ function StudioPage() {
   const [showReferenceErrors, setShowReferenceErrors] = useState(false)
   const referenceErrorsRef = useRef<HTMLDivElement | null>(null)
 
+  // Older saved recipes point to the removed local gallery. Rebind them to the API item.
+  useEffect(() => {
+    const savedCostume = recipe.costume
+    const savedUrl = savedCostume?.原图 || savedCostume?.预览图 || savedCostume?.缩略图 || ''
+    const isLocalAsset = /^\/?img\//i.test(savedUrl)
+    const isCatalogAsset = savedCostume?.source === 'upload' && savedCostume.分类 !== '上传' && !savedUrl.startsWith('data:')
+    if (!hydrated || !savedCostume || (!isLocalAsset && !isCatalogAsset)) return
+    let cancelled = false
+    void qc.ensureQueryData(costumesQuery).then((items) => {
+      if (cancelled) return
+      const match = items.find((item) => item.id === savedCostume.id || item.服装名称 === savedCostume.服装名称)
+      if (!match) {
+        if (isLocalAsset) setCostume(null)
+        return
+      }
+      const currentView = savedCostume.selectedView || 'front'
+      const next = selectCostumeView(match, currentView)
+      if (isLocalAsset || next.原图 !== savedCostume.原图 || next.缩略图 !== savedCostume.缩略图) setCostume(next)
+    }).catch(() => {
+      if (!cancelled) toast.error('服装参考图加载失败，请重新选择')
+    })
+    return () => { cancelled = true }
+  }, [hydrated, qc, recipe.costume, setCostume])
+
   const activeProvider = apiConfig.activeProvider
   const providerMeta = PROVIDER_META[activeProvider]
   const providerCfg = apiConfig.providers[activeProvider]
