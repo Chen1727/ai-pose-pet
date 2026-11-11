@@ -4,6 +4,7 @@ import {
   ExternalLinkIcon,
   EyeIcon,
   EyeOffIcon,
+  LoaderCircleIcon,
   RotateCcwIcon,
   ScanSearchIcon,
   SparklesIcon,
@@ -16,7 +17,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
-import { detectComfyUi, PROVIDER_META } from '@/services/aiGenerator'
+import { detectComfyUi, PROVIDER_META, testProviderConnection } from '@/services/aiGenerator'
 import { useStudio } from '@/store/studioStore'
 import type { ImagePassMode, ImageProviderId } from '@/types/gallery'
 import { ComfyConnectionStatus } from '@/components/studio/ComfyConnectionStatus'
@@ -33,6 +34,8 @@ function SettingsPage() {
   const { apiConfig, updateApiConfig, updateProviderConfig, comfyConnection } = useStudio()
   const [showKey, setShowKey] = useState(false)
   const [testingComfy, setTestingComfy] = useState(false)
+  const [testingProvider, setTestingProvider] = useState(false)
+  const [testResult, setTestResult] = useState<{ provider: ImageProviderId; message: string; ok: boolean } | null>(null)
 
   const pid = apiConfig.activeProvider
   const meta = PROVIDER_META[pid]
@@ -52,6 +55,20 @@ function SettingsPage() {
       toast.success(`已识别：${found.info}（${found.baseUrl}）`)
     } finally {
       setTestingComfy(false)
+    }
+  }
+
+  const handleTestConnection = async () => {
+    const provider = pid
+    setTestingProvider(true)
+    setTestResult(null)
+    try {
+      const message = await testProviderConnection(provider, apiConfig)
+      setTestResult({ provider, message, ok: true })
+    } catch (error) {
+      setTestResult({ provider, message: error instanceof Error ? error.message : '连接测试失败', ok: false })
+    } finally {
+      setTestingProvider(false)
     }
   }
 
@@ -82,7 +99,7 @@ function SettingsPage() {
             <button
               key={id}
               type="button"
-              onClick={() => updateApiConfig({ activeProvider: id })}
+              onClick={() => { updateApiConfig({ activeProvider: id }); setTestResult(null) }}
               className={`flex items-center justify-between rounded-xl border px-3.5 py-2.5 text-left transition-all ${
                 isActive
                   ? 'border-primary bg-primary/6 font-semibold shadow-xs'
@@ -109,6 +126,10 @@ function SettingsPage() {
         title={`${meta.name} 连接配置`}
         actions={
           <div className="flex items-center gap-1.5">
+            <Button variant="outline" size="sm" onClick={() => void handleTestConnection()} disabled={testingProvider}>
+              {testingProvider ? <LoaderCircleIcon className="size-3.5 animate-spin" /> : <ScanSearchIcon className="size-3.5" />}
+              {testingProvider ? '测试中' : '测试连接'}
+            </Button>
             {pid === 'comfyui' && (
               <>
                 <Button variant="outline" size="sm" onClick={handleDetectComfy} disabled={testingComfy}>
@@ -131,6 +152,7 @@ function SettingsPage() {
                   baseUrl: meta.defaultBaseUrl,
                   model: meta.models[0].value,
                 })
+                setTestResult(null)
                 toast.success('已恢复默认')
               }}
             >
@@ -151,7 +173,7 @@ function SettingsPage() {
           <Input
             type={pid === 'comfyui' ? 'text' : 'url'}
             value={pCfg.baseUrl}
-            onChange={(e) => updateProviderConfig(pid, { baseUrl: e.target.value })}
+            onChange={(e) => { updateProviderConfig(pid, { baseUrl: e.target.value }); setTestResult(null) }}
             placeholder={meta.defaultBaseUrl}
           />
         </Field>
@@ -161,7 +183,7 @@ function SettingsPage() {
             <Input
               type={showKey ? 'text' : 'password'}
               value={pCfg.apiKey}
-              onChange={(e) => updateProviderConfig(pid, { apiKey: e.target.value })}
+              onChange={(e) => { updateProviderConfig(pid, { apiKey: e.target.value }); setTestResult(null) }}
               placeholder={
                 pid === 'comfyui'
                   ? '本地 ComfyUI 无需填写，远程鉴权可填 Token'
@@ -209,6 +231,9 @@ function SettingsPage() {
             />
           </Field>
         )}
+        {testResult?.provider === pid && <p role="status" className={`@lg/section:col-span-2 text-sm ${testResult.ok ? 'text-emerald-700 dark:text-emerald-400' : 'text-destructive'}`}>
+          {testResult.ok ? '连接成功：' : '连接失败：'}{testResult.message}
+        </p>}
       </Section>
 
       {pid === 'comfyui' && (
@@ -227,7 +252,7 @@ function SettingsPage() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="url">传递图片 URL（免上传文件，推荐）</SelectItem>
+                <SelectItem value="url">自动（本地图片转 Base64，公网图片用 URL）</SelectItem>
                 <SelectItem value="base64">转 Base64 编码传输</SelectItem>
               </SelectContent>
             </Select>
@@ -243,7 +268,7 @@ function SettingsPage() {
               </span>
               <Switch
                 checked={apiConfig.useProxy}
-                onCheckedChange={(v) => updateApiConfig({ useProxy: v })}
+                onCheckedChange={(v) => { updateApiConfig({ useProxy: v }); setTestResult(null) }}
               />
             </div>
           </Field>

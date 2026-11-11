@@ -41,7 +41,7 @@ export const navGroups: NavGroup[] = [
     ],
   },
   {
-    label: '待补充图库',
+    label: '人类参考图库',
     items: [
       { title: '服装穿搭库', to: '/costumes', icon: ShirtIcon },
       { title: '人像颜值库', to: '/portraits', icon: UserRoundIcon },

@@ -36,6 +36,7 @@ import type {
   QwenParams,
   RecipeState,
 } from '@/types/gallery'
+import type { PetImage } from '@/types/pet'
 
 const CFG_KEY = 'pose_atlas_api_config_v3'
 // Catalog cleanup invalidates the old selection cache so removed references do not reappear.
@@ -44,7 +45,25 @@ const HISTORY_KEY = 'pose_atlas_history_v3'
 const TASK_KEY = 'pose_atlas_active_task_v1'
 type ActiveTask = { task?: ComfyTaskHandle; prompt: string; summary: string; unknown?: boolean; snapshot?: GenerationSnapshot }
 
-const COMFY_CONFIG_VERSION = 3
+const COMFY_CONFIG_VERSION = 4
+
+const randomItem = <T,>(items: T[]) => items[Math.floor(Math.random() * items.length)]
+
+function interactionPoseItems(images: PetImage[]): PoseItem[] {
+  return images
+    .filter((image) => image.category === 'interaction')
+    .flatMap((image) => (image.views?.length ? image.views : [{ id: 'default', label: image.type, thumbnail: image.thumbnail, original: image.original }]).map((view) => ({
+      id: `${image.id}-${view.id}`,
+      体系: '人宠互动',
+      姿势编号: image.id,
+      分类: image.type,
+      姿势名称: image.title,
+      角度: view.label,
+      缩略图: view.thumbnail,
+      原图: view.original,
+      检索: `${image.title} ${image.tags.join(' ')}`,
+    })))
+}
 
 const shouldEnableProxyByDefault = (provider?: ImageProviderId) =>
   provider === 'qwen' || provider === 'doubao'
@@ -124,7 +143,7 @@ const DEFAULT_API_CONFIG: ApiConfig = {
   },
 }
 
-// v1 → v2：旧版默认的 Qwen 2.1 预设引用了本机通常不存在的模型，自动切换为 Qwen Image Edit 2509
+// 旧版内置工作流迁移到新的宠物合成默认工作流。
 const LEGACY_COMFY_BASE_URLS = ['http://127.0.0.1:8188', 'http://localhost:8188']
 
 function migrateComfy(
@@ -133,7 +152,7 @@ function migrateComfy(
 ): { provider: ApiConfig['providers']['comfyui']; params: ApiConfig['comfyuiParams'] } {
   if ((params.configVersion ?? 1) >= COMFY_CONFIG_VERSION) return { provider, params }
   const nextParams = { ...params, configVersion: COMFY_CONFIG_VERSION }
-  if (params.workflowPreset === 'qwen21_3img' || params.workflowPreset === 'qwen21_2img') {
+  if (['qwen2509_3img', 'qwen2509_2img', 'qwen21_3img', 'qwen21_2img'].includes(params.workflowPreset)) {
     Object.assign(nextParams, {
       workflowPreset: DEFAULT_COMFY_PRESET,
       workflowJson: JSON.stringify(COMFYUI_WORKFLOW_TEMPLATES[DEFAULT_COMFY_PRESET].workflow, null, 2),
@@ -195,9 +214,6 @@ interface StudioContextValue {
   recipe: RecipeState
   apiConfig: ApiConfig
   history: GenerationHistoryItem[]
-  poseDepthMode: boolean
-  setPoseDepthMode: (val: boolean) => void
-  toggleRecipePoseDepth: () => void
   // 全局持久化的合成台状态（切换页面不丢失、不断开请求）
   customPrompt: string | null
   setCustomPrompt: (val: string | null) => void
@@ -216,11 +232,12 @@ interface StudioContextValue {
   toggleCostume: (item: CostumeItem) => void
   togglePose: (item: PoseItem) => void
   addExtraImage: (item: { name: string; url: string; role?: ExtraReferenceImage['role'] }) => void
+  replaceExtraImage: (id: string, item: { name: string; url: string; role?: ExtraReferenceImage['role'] }) => void
   removeExtraImage: (id: string) => void
   updateExtraImageName: (id: string, name: string) => void
   setWorkflowImage: (nodeId: string, image: ExtraReferenceImage | null, identity: string) => void
   clearRecipe: () => void
-  randomizeRecipe: (pools: { portraits?: PortraitItem[]; costumes?: CostumeItem[]; poses?: PoseItem[] }) => void
+  randomizeRecipe: (pools: { portraits?: PortraitItem[]; costumes?: CostumeItem[]; poses?: PoseItem[]; pets?: PetImage[] }) => void
   randomizeSlot: (slot: ReferenceSlot, scope: RandomScope, pools: ReferencePools, expectedId?: string | null) => void
   updateApiConfig: (patch: Partial<ApiConfig>) => void
   updateProviderConfig: (provider: ImageProviderId, patch: Partial<ProviderEndpointConfig>) => void
@@ -245,7 +262,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       return {
         portrait: parsed.portrait ?? null,
         costume: parsed.costume ?? null,
-        pose: parsed.pose ?? null,
+        pose: parsed.pose ? { ...parsed.pose, useDepth: false } : null,
         extraImages: Array.isArray(parsed.extraImages) ? parsed.extraImages.slice(0, 2) : [],
       }
     } catch {
@@ -274,9 +291,8 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   const [comfyConnectionVisible, setComfyConnectionVisible] = useState(false)
   const { comfyConnection, checkComfyConnection } = useComfyConnection(apiConfig.providers.comfyui.baseUrl, apiConfig.providers.comfyui.apiKey, comfyConnectionVisible && apiConfig.activeProvider === 'comfyui')
 
-  const [poseDepthMode, setPoseDepthModeState] = useState<boolean>(() => Boolean(recipe.pose?.useDepth))
-  const randomContext = useRef({ recipe, poseDepthMode })
-  useEffect(() => { randomContext.current = { recipe, poseDepthMode } }, [recipe, poseDepthMode])
+  const randomContext = useRef({ recipe })
+  useEffect(() => { randomContext.current = { recipe } }, [recipe])
 
   // 提升到根部 Provider 的生成状态，路由切换不会卸载或中断
   const [customPrompt, setCustomPrompt] = useState<string | null>(null)
@@ -311,17 +327,15 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     ]).then(([savedRecipe, savedHistory, savedTask]) => {
       if (!active) return
       if (savedRecipe) {
-        if (savedRecipe.pose?.useDepth !== undefined) {
-          setPoseDepthModeState(Boolean(savedRecipe.pose.useDepth))
-        }
-        setRecipe({
-          portrait: savedRecipe.portrait ?? null,
+        setRecipe((current) => ({
+          // 兼容旧版本曾经把人像清空的 IndexedDB 记录，优先保留轻量备份中的人像。
+          portrait: savedRecipe.portrait ?? current.portrait ?? null,
           costume: savedRecipe.costume ?? null,
-          pose: savedRecipe.pose ?? null,
+          pose: savedRecipe.pose ? { ...savedRecipe.pose, useDepth: false } : null,
           workflowImages: savedRecipe.workflowImages ?? {},
           workflowImagesIdentity: savedRecipe.workflowImagesIdentity,
           extraImages: Array.isArray(savedRecipe.extraImages) ? savedRecipe.extraImages.slice(0, 2) : [],
-        })
+        }))
       }
       if (Array.isArray(savedHistory)) {
         historyRef.current = savedHistory
@@ -358,21 +372,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
 
   const setPortrait = (portrait: PortraitItem | null) => setRecipe((r) => ({ ...r, portrait }))
   const setCostume = (costume: CostumeItem | null) => setRecipe((r) => ({ ...r, costume }))
-  const setPose = (pose: PoseItem | null) => setRecipe((r) => ({ ...r, pose }))
-
-  const setPoseDepthMode = (val: boolean) => {
-    setPoseDepthModeState(val)
-    setRecipe((r) => {
-      if (!r.pose || r.pose.source === 'upload' || Boolean(r.pose.useDepth) === val) return r
-      return { ...r, pose: { ...r.pose, useDepth: val } }
-    })
-  }
-
-  const toggleRecipePoseDepth = () => {
-    const next = !(recipe.pose?.useDepth ?? poseDepthMode)
-    setPoseDepthMode(next)
-    toast.success(next ? '已切换姿势图为：深度图 (Depth)' : '已切换姿势图为：素体白模')
-  }
+  const setPose = (pose: PoseItem | null) => setRecipe((r) => ({ ...r, pose: pose ? { ...pose, useDepth: false } : null }))
 
   const togglePortrait = (item: PortraitItem) => {
     const remove = recipe.portrait?.id === item.id
@@ -385,15 +385,14 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     toast.success(remove ? '已移除服装' : `已选服装：${item.服装名称}`)
   }
   const togglePose = (item: PoseItem) => {
-    const useDepth = item.source === 'upload' ? false : (item.useDepth ?? poseDepthMode)
-    const remove = recipe.pose?.id === item.id && Boolean(recipe.pose?.useDepth) === useDepth
-    setRecipe((r) => ({ ...r, pose: remove ? null : { ...item, useDepth } }))
-    toast.success(remove ? '已移除姿势' : `已选姿势：${item.姿势名称}（${item.角度}${useDepth ? ' · 深度图' : ''}）`)
+    const remove = recipe.pose?.id === item.id
+    setRecipe((r) => ({ ...r, pose: remove ? null : { ...item, useDepth: false } }))
+    toast.success(remove ? '已移除姿势' : `已选姿势：${item.姿势名称}（${item.角度}）`)
   }
 
   const addExtraImage = (item: { name: string; url: string; role?: ExtraReferenceImage['role'] }) => {
     if ((recipe.extraImages || []).length >= 2) {
-      toast.error('宠物参考图最多选择 2 张；合成台总参考图最多 5 张')
+      toast.error('附加参考图最多选择 2 张；合成台总参考图最多 5 张')
       return
     }
     if (item.role && (recipe.extraImages || []).some((image) => image.role === item.role)) {
@@ -420,6 +419,13 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     }))
   }
 
+  const replaceExtraImage = (id: string, item: { name: string; url: string; role?: ExtraReferenceImage['role'] }) => {
+    setRecipe((r) => ({
+      ...r,
+      extraImages: (r.extraImages || []).map((image) => image.id === id ? { ...image, name: item.name, url: item.url, role: item.role } : image),
+    }))
+  }
+
   const updateExtraImageName = (id: string, name: string) => {
     setRecipe((r) => ({
       ...r,
@@ -443,7 +449,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     const cp = activeComfyParams
     const identity = workflowIdentity(cp.workflowJson)
     const workflow = parseParameterWorkflow(cp.workflowJson)
-    const mapped = [cp.portraitNodeId, cp.costumeNodeId, cp.poseNodeId, cp.stitchedNodeId]
+    const mapped = [cp.portraitNodeId, cp.costumeNodeId, cp.poseNodeId, cp.petNodeId, cp.petCostumeNodeId, cp.stitchedNodeId]
     const ids = new Set(Object.entries(workflow || {}).filter(([id, node]) => !mapped.includes(id) && typeof node.inputs.image === 'string').map(([id]) => id))
     // IndexedDB 恢复与工作流变更同步时清理失效映射。
     // oxlint-disable-next-line react/set-state-in-effect
@@ -460,23 +466,41 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     toast.success('已清空配方')
   }
 
-  const randomizeRecipe = (pools: { portraits?: PortraitItem[]; costumes?: CostumeItem[]; poses?: PoseItem[] }) => {
-    const posePool = pools.poses || []
+  const randomizeRecipe = (pools: { portraits?: PortraitItem[]; costumes?: CostumeItem[]; poses?: PoseItem[]; pets?: PetImage[] }) => {
     const costumePool = (pools.costumes || []).filter((c) => !c.source && c.一级分类 !== '二次元')
     const portraitPool = pools.portraits || []
+    const petPool = (pools.pets || []).filter((pet) => pet.kind === 'breed' && (pet.category === 'cat' || pet.category === 'dog'))
 
-    setRecipe((prev) => ({
-      ...prev,
-      portrait: portraitPool.length
-        ? portraitPool[Math.floor(Math.random() * portraitPool.length)]
-        : prev.portrait,
-      costume: costumePool.length
-        ? costumePool[Math.floor(Math.random() * costumePool.length)]
-        : prev.costume,
-      pose: posePool.length
-        ? { ...posePool[Math.floor(Math.random() * posePool.length)], useDepth: poseDepthMode }
-        : prev.pose,
-    }))
+    setRecipe((prev) => {
+      const portrait = portraitPool.length ? randomItem(portraitPool) : prev.portrait
+      const pet = petPool.length ? randomItem(petPool) : null
+      const petView = pet?.views?.find((view) => view.id === 'front') || pet?.views?.[0]
+      const petReference = pet && {
+        id: `random-pet-${pet.id}`,
+        name: pet.title,
+        url: petView?.original || pet.original,
+        role: 'pet_reference' as const,
+      }
+      const petCostumePool = (pools.pets || []).filter((item) => item.category === 'pet_costume' && (!pet || item.tags.includes(pet.category === 'cat' ? '猫猫' : '狗狗')))
+      const petCostume = petCostumePool.length ? randomItem(petCostumePool) : null
+      const petCostumeView = petCostume?.views?.find((view) => view.id === 'front') || petCostume?.views?.[0]
+      const petCostumeReference = petCostume && {
+        id: `random-pet-costume-${petCostume.id}`,
+        name: petCostume.title,
+        url: petCostumeView?.original || petCostume.original,
+        role: 'pet_costume' as const,
+      }
+      const retainedExtras = (prev.extraImages || []).filter((image) => image.role !== 'pet_reference' && image.role !== 'pet_costume')
+      const extraImages = [...retainedExtras.slice(0, Math.max(0, 2 - Number(Boolean(petReference)) - Number(Boolean(petCostumeReference)))), petReference, petCostumeReference].filter(Boolean) as ExtraReferenceImage[]
+      const posePool = portrait && petReference && pools.pets ? interactionPoseItems(pools.pets) : (pools.poses || [])
+      return {
+        ...prev,
+        portrait,
+        costume: costumePool.length ? randomItem(costumePool) : prev.costume,
+        pose: posePool.length ? { ...randomItem(posePool), useDepth: false } : prev.pose,
+        extraImages,
+      }
+    })
     toast.success('已随机抽取一套角色配方')
   }
 
@@ -490,7 +514,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       ...pools,
       costumes: pools.costumes || [],
       poses: pools.poses || [],
-    }, current.poseDepthMode)
+    }, false)
     if (!next) {
       toast.info(scope === 'similar' ? '没有其他同类素材，可切到“全部”再试' : '没有其他可用素材')
       return
@@ -681,9 +705,6 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         recipe,
         apiConfig,
         history,
-        poseDepthMode,
-        setPoseDepthMode,
-        toggleRecipePoseDepth,
         customPrompt,
         setCustomPrompt,
         previewUrl,
@@ -701,6 +722,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         toggleCostume,
         togglePose,
         addExtraImage,
+        replaceExtraImage,
         removeExtraImage,
         updateExtraImageName,
         setWorkflowImage,

@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/sidebar'
 import { useStudio } from '@/store/studioStore'
 import { petsQuery } from '@/api/pets'
+import { costumesQuery, portraitsQuery } from '@/api/gallery'
 import { activeNavTo, navGroups } from './nav'
 
 export function AppSidebar() {
@@ -23,11 +24,15 @@ export function AppSidebar() {
   const active = activeNavTo(pathname)
   const { recipe } = useStudio()
   const { data: pets } = useQuery(petsQuery)
+  const { data: costumes } = useQuery(costumesQuery)
+  const { data: portraits } = useQuery(portraitsQuery)
   const petCounts: Record<string, number | undefined> = {
-    '/pet-poses': pets?.filter((image) => image.category === 'cat' || image.category === 'dog').length,
-    '/pet-breeds': pets?.filter((image) => image.category === 'cat' || image.category === 'dog').length,
+    '/pet-poses': pets?.filter((image) => image.kind === 'pose').length,
+    '/pet-breeds': pets?.filter((image) => image.kind === 'breed').length,
     '/pet-costumes': pets?.filter((image) => image.category === 'pet_costume').length,
     '/pet-interactions': pets?.filter((image) => image.category === 'interaction').length,
+    '/costumes': costumes?.length,
+    '/portraits': portraits?.length,
   }
   const count = [recipe.portrait, recipe.costume, recipe.pose].filter(Boolean).length + (recipe.extraImages || []).length
 

@@ -106,6 +106,11 @@ const comfyProxy = {
     target: process.env.PET_API_URL || 'http://127.0.0.1:3000',
     changeOrigin: true,
   },
+  '/pet-api': {
+    target: process.env.PET_ASSET_API_URL || 'http://127.0.0.1:8000',
+    changeOrigin: true,
+    rewrite: (p: string) => p.replace(/^\/pet-api/, '') || '/',
+  },
   '/uploads': {
     target: process.env.PET_API_URL || 'http://127.0.0.1:3000',
     changeOrigin: true,

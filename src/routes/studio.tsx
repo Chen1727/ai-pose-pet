@@ -15,7 +15,6 @@ import {
   ImagePlusIcon,
   KeyRoundIcon,
   LayoutGridIcon,
-  LinkIcon,
   LoaderCircleIcon,
   PersonStandingIcon,
   PawPrintIcon,
@@ -28,9 +27,10 @@ import {
   UserRoundIcon,
   XIcon,
 } from 'lucide-react'
-import { type ChangeEvent, type DragEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { type ChangeEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from '@/lib/notifications'
 import { costumesQuery, portraitsQuery, posesQuery } from '@/api/gallery'
+import { petsQuery } from '@/api/pets'
 import { Field, Section } from '@/components/common/FormSection'
 import { ComfyConnectionStatus } from '@/components/studio/ComfyConnectionStatus'
 import { WorkflowParameters } from '@/components/studio/WorkflowParameters'
@@ -72,6 +72,7 @@ import type {
   ImageProviderId,
   QwenParams,
 } from '@/types/gallery'
+import type { PetImage } from '@/types/pet'
 
 export const Route = createFileRoute('/studio')({
   staticData: { title: 'AI 合成台' },
@@ -79,6 +80,26 @@ export const Route = createFileRoute('/studio')({
 })
 
 const PROVIDER_LIST: ImageProviderId[] = ['gemini', 'gpt', 'qwen', 'doubao', 'comfyui']
+
+function pickRandom<T>(items: T[]): T {
+  return items[Math.floor(Math.random() * items.length)]
+}
+
+function interactionPoseItems(images: PetImage[]) {
+  return images
+    .filter((image) => image.category === 'interaction')
+    .flatMap((image) => (image.views?.length ? image.views : [{ id: 'default', label: image.type, thumbnail: image.thumbnail, original: image.original }]).map((view) => ({
+      id: `${image.id}-${view.id}`,
+      体系: '人宠互动',
+      姿势编号: image.id,
+      分类: image.type,
+      姿势名称: image.title,
+      角度: view.label,
+      缩略图: view.thumbnail,
+      原图: view.original,
+      检索: `${image.title} ${image.tags.join(' ')}`,
+    })))
+}
 
 function StudioPage() {
   const {
@@ -97,8 +118,8 @@ function StudioPage() {
     setPortrait,
     setCostume,
     setPose,
-    toggleRecipePoseDepth,
     addExtraImage,
+    replaceExtraImage,
     removeExtraImage,
     updateExtraImageName,
     updateApiConfig,
@@ -116,13 +137,14 @@ function StudioPage() {
   const [comparisonResult, setComparisonResult] = useState<GenerationHistoryItem | null>(null)
   const previewResult = history.find((item) => item.imageUrl === previewUrl)
   const qc = useQueryClient()
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
   const comfyFileInputRef = useRef<HTMLInputElement | null>(null)
   const slotInputRef = useRef<HTMLInputElement | null>(null)
   const uploadSlotRef = useRef<'portrait' | 'costume' | 'pose' | 'pet' | 'pet_costume'>('portrait')
   const [uploadingSlot, setUploadingSlot] = useState<string | null>(null)
   const [randomizingSlot, setRandomizingSlot] = useState<ReferenceSlot | null>(null)
   const [randomScopes, setRandomScopes] = useState<Record<ReferenceSlot, RandomScope>>({ portrait: 'similar', costume: 'similar', pose: 'similar' })
+  const [petRandomScopes, setPetRandomScopes] = useState<Record<'pet_reference' | 'pet_costume', RandomScope>>({ pet_reference: 'similar', pet_costume: 'similar' })
+  const [randomizingPetSlot, setRandomizingPetSlot] = useState<'pet_reference' | 'pet_costume' | null>(null)
   const costumeViews = recipe.costume?.views?.filter((view) => view.原图 && view.缩略图) || []
   const [showReferenceErrors, setShowReferenceErrors] = useState(false)
   const referenceErrorsRef = useRef<HTMLDivElement | null>(null)
@@ -135,12 +157,9 @@ function StudioPage() {
   const defaultPrompt = buildRecipePrompt(recipe, apiConfig.stylePreset, activeWorkflowImages)
   const prompt = customPrompt ?? defaultPrompt
   const [showAdvanced, setShowAdvanced] = useState(false)
-  const [extraUrlInput, setExtraUrlInput] = useState('')
-  const [showUrlInput, setShowUrlInput] = useState(false)
   const [stitchModalUrl, setStitchModalUrl] = useState<string | null>(null)
   const [zoomImageUrl, setZoomImageUrl] = useState<string | null>(null)
   const [showComfyJsonModal, setShowComfyJsonModal] = useState(false)
-  const [isDragging, setIsDragging] = useState(false)
   const [comfyCheck, setComfyCheck] = useState<(ComfyCheckResult & { info?: string }) | null>(null)
   const [checkingComfy, setCheckingComfy] = useState(false)
 
@@ -191,6 +210,8 @@ function StudioPage() {
         cp.portraitNodeId,
         cp.costumeNodeId,
         cp.poseNodeId,
+        cp.petNodeId,
+        cp.petCostumeNodeId,
         cp.stitchedNodeId,
       ])
       // 自动修复仅用于提交副本，保留导入的原始 API。
@@ -285,61 +306,59 @@ function StudioPage() {
     }
   }
 
+  const extraImages = recipe.extraImages || []
+  const petReference = extraImages.find((image) => image.role === 'pet_reference')
+  const petCostume = extraImages.find((image) => image.role === 'pet_costume')
+  const attachmentImages = extraImages.filter((image) => image.role !== 'pet_reference' && image.role !== 'pet_costume')
+
+  const autoComfyPreset = activeProvider === 'comfyui'
+    ? recipe.portrait && recipe.costume && recipe.pose && petReference && petCostume
+      ? 'qwen21_5img'
+      : recipe.portrait && recipe.costume && recipe.pose && petReference
+        ? 'qwen21_4img'
+      : !recipe.portrait && !recipe.costume && recipe.pose && petReference && petCostume
+        ? 'qwen21_pet_3img'
+        : !recipe.portrait && !recipe.costume && recipe.pose && petReference
+          ? 'qwen21_pet_2img'
+          : null
+    : null
+
+  useEffect(() => {
+    const currentPreset = apiConfig.comfyuiParams.workflowPreset
+    const autoPresets = ['qwen21_5img', 'qwen21_4img', 'qwen21_pet_3img', 'qwen21_pet_2img']
+    if (!autoComfyPreset || !autoPresets.includes(currentPreset) || autoComfyPreset === currentPreset) return
+    const tpl = COMFYUI_WORKFLOW_TEMPLATES[autoComfyPreset]
+    updateComfyUiParams({
+      workflowPreset: autoComfyPreset,
+      workflowJson: JSON.stringify(tpl.workflow, null, 2),
+      ...tpl.defaults,
+    })
+    toast.success(`已根据参考图切换为：${tpl.label}`)
+  }, [activeProvider, apiConfig.comfyuiParams.workflowPreset, autoComfyPreset, updateComfyUiParams])
+
   const missingReferences = activeProvider === 'comfyui' ? [
     { label: '人像', node: apiConfig.comfyuiParams.portraitNodeId, image: recipe.portrait },
     { label: '服装', node: apiConfig.comfyuiParams.costumeNodeId, image: recipe.costume },
     { label: '姿势', node: apiConfig.comfyuiParams.poseNodeId, image: recipe.pose },
+    { label: '宠物', node: apiConfig.comfyuiParams.petNodeId, image: petReference },
+    { label: '宠物服装', node: apiConfig.comfyuiParams.petCostumeNodeId, image: petCostume },
   ].filter((slot) => slot.node && slot.node !== 'none' && parsedComfyNodes.imageNodes.some((node) => node.id === slot.node && node.emptyValue === undefined) && !slot.image).map((slot) => slot.label) : []
 
-  const extraImages = recipe.extraImages || []
-  const petReference = extraImages.find((image) => image.role === 'pet_reference')
-  const petCostume = extraImages.find((image) => image.role === 'pet_costume')
   const hasStitchRefs = Boolean(recipe.portrait || recipe.costume || recipe.pose || extraImages.length > 0)
   const hasAnyRef = hasStitchRefs || activeWorkflowImages.length > 0
 
-  const processFiles = async (files: File[]) => {
-    const imgFiles = files.filter((f) => f.type.startsWith('image/'))
-    if (!imgFiles.length) return
-    try {
-      for (const file of imgFiles) {
-        const dataUrl = await fileToDataUrl(file)
-        const baseName = file.name.replace(/\.[^.]+$/, '').slice(0, 16)
-        addExtraImage({ name: baseName || '宠物参考图', url: dataUrl, role: 'pet_reference' })
-      }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : '图片读取失败')
-    }
-  }
-
-  // 支持在合成台直接 Cmd+V / Ctrl+V 粘贴剪贴板图片作为附加参考图
-  useEffect(() => {
-    const onPaste = (e: ClipboardEvent) => {
-      const target = e.target as HTMLElement | null
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return
-      const items = Array.from(e.clipboardData?.items || [])
-      const files = items
-        .filter((it) => it.type.startsWith('image/'))
-        .map((it) => it.getAsFile())
-        .filter(Boolean) as File[]
-      if (files.length > 0) {
-        e.preventDefault()
-        void processFiles(files)
-      }
-    }
-    window.addEventListener('paste', onPaste)
-    return () => window.removeEventListener('paste', onPaste)
-  })
-
   const handleRandom = async () => {
-    const [posesRes, costumes, portraits] = await Promise.all([
+    const [posesRes, costumes, portraits, pets] = await Promise.all([
       qc.ensureQueryData(posesQuery),
       qc.ensureQueryData(costumesQuery),
       qc.ensureQueryData(portraitsQuery),
+      qc.ensureQueryData(petsQuery),
     ])
     randomizeRecipe({
       poses: posesRes.items,
       costumes,
       portraits,
+      pets,
     })
   }
 
@@ -349,12 +368,56 @@ function StudioPage() {
     try {
       const pools = slot === 'portrait' ? { portraits: await qc.ensureQueryData(portraitsQuery) }
         : slot === 'costume' ? { costumes: await qc.ensureQueryData(costumesQuery) }
-        : { poses: (await qc.ensureQueryData(posesQuery)).items }
+        : { poses: recipe.portrait && petReference ? interactionPoseItems(await qc.ensureQueryData(petsQuery)) : (await qc.ensureQueryData(posesQuery)).items }
       randomizeSlot(slot, randomScopes[slot], pools, expectedId)
     } catch {
       toast.error('素材库加载失败，请稍后重试')
     } finally {
       setRandomizingSlot(null)
+    }
+  }
+
+  const handleRandomPetSlot = async (slot: 'pet_reference' | 'pet_costume') => {
+    const current = slot === 'pet_reference' ? petReference : petCostume
+    setRandomizingPetSlot(slot)
+    try {
+      const images = await qc.ensureQueryData(petsQuery)
+      const currentImage = current && images.find((image) => image.original === current.url || image.views?.some((view) => view.original === current.url))
+      const selectedPet = petReference && images.find((image) => image.original === petReference.url || image.views?.some((view) => view.original === petReference.url))
+      const selectedPetTag = selectedPet?.category === 'cat' ? '猫猫' : selectedPet?.category === 'dog' ? '狗狗' : null
+      const candidates = images.filter((image) => {
+        if (slot === 'pet_costume' && image.category !== 'pet_costume') return false
+        if (slot === 'pet_reference' && (image.kind !== 'breed' || (image.category !== 'cat' && image.category !== 'dog'))) return false
+        if (slot === 'pet_costume' && selectedPetTag && !image.tags.includes(selectedPetTag)) return false
+        if (currentImage && image.id === currentImage.id) return false
+        if (petRandomScopes[slot] === 'all' || !currentImage) return true
+        return slot === 'pet_reference'
+          ? image.category === currentImage.category
+          : (!selectedPetTag || image.tags.includes(selectedPetTag)) && image.type === currentImage.type
+      })
+      if (!candidates.length) {
+        toast.info(petRandomScopes[slot] === 'similar' ? '没有其他同类素材，可切到“全部”再试' : '没有其他可用素材')
+        return
+      }
+      const picked = pickRandom(candidates)
+      const view = picked.views?.[0]
+      const next = { name: picked.title, url: view?.original || picked.original, role: slot as 'pet_reference' | 'pet_costume' }
+      if (current) replaceExtraImage(current.id, next)
+      else addExtraImage(next)
+      if (slot === 'pet_reference' && petCostume) {
+        const pickedPetTag = picked.category === 'cat' ? '猫猫' : '狗狗'
+        const matchingCostumes = images.filter((image) => image.category === 'pet_costume' && image.tags.includes(pickedPetTag) && image.original !== petCostume.url)
+        if (matchingCostumes.length) {
+          const costume = pickRandom(matchingCostumes)
+          const costumeView = costume.views?.[0]
+          replaceExtraImage(petCostume.id, { name: costume.title, url: costumeView?.original || costume.original, role: 'pet_costume' })
+        }
+      }
+      toast.success(`已更换${slot === 'pet_reference' ? '宠物' : '宠物服装'}`)
+    } catch {
+      toast.error('宠物图库加载失败，请稍后重试')
+    } finally {
+      setRandomizingPetSlot(null)
     }
   }
 
@@ -368,30 +431,15 @@ function StudioPage() {
     </Button>
   </div>
 
-  const handleUploadFiles = async (e: ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || [])
-    await processFiles(files)
-    e.target.value = ''
-  }
-
-  const handleDropFiles = async (e: DragEvent<HTMLDivElement>) => {
-    e.preventDefault()
-    setIsDragging(false)
-    const files = Array.from(e.dataTransfer.files || [])
-    await processFiles(files)
-  }
-
-  const handleAddUrl = () => {
-    const trimmed = extraUrlInput.trim()
-    if (!trimmed) return
-    if (!/^https?:\/\//i.test(trimmed) && !trimmed.startsWith('data:image/')) {
-      toast.error('请输入有效的 http(s):// 图片链接')
-      return
-    }
-    addExtraImage({ name: '宠物参考图', url: trimmed, role: 'pet_reference' })
-    setExtraUrlInput('')
-    setShowUrlInput(false)
-  }
+  const petRandomControls = (slot: 'pet_reference' | 'pet_costume', label: string) => <div className="flex basis-full flex-wrap items-center gap-2 border-t pt-2">
+    <Select value={petRandomScopes[slot]} onValueChange={(value) => setPetRandomScopes((current) => ({ ...current, [slot]: value as RandomScope }))}>
+      <SelectTrigger aria-label={`${label}换样范围`} className="min-h-11 w-24"><SelectValue /></SelectTrigger>
+      <SelectContent><SelectItem value="similar">同类</SelectItem><SelectItem value="all">全部</SelectItem></SelectContent>
+    </Select>
+    <Button type="button" variant="outline" className="min-h-11" disabled={uploadingSlot !== null || randomizingSlot !== null || randomizingPetSlot !== null} onClick={() => void handleRandomPetSlot(slot)} aria-label={`${label}换一个`}>
+      {randomizingPetSlot === slot ? <LoaderCircleIcon className="size-4 animate-spin motion-reduce:animate-none" /> : <DicesIcon className="size-4" />}换一个
+    </Button>
+  </div>
 
   const handleOpenStitchModal = async () => {
     try {
@@ -406,7 +454,7 @@ function StudioPage() {
     if (activeProvider === 'comfyui') {
       const cp = apiConfig.comfyuiParams
       const workflowImages = recipe.workflowImagesIdentity === workflowIdentity(cp.workflowJson) ? recipe.workflowImages || {} : {}
-      const selected = [recipe.portrait ? cp.portraitNodeId : '', recipe.costume ? cp.costumeNodeId : '', recipe.pose ? cp.poseNodeId : '', ...Object.keys(workflowImages)].filter((id) => id && id !== 'none')
+      const selected = [recipe.portrait ? cp.portraitNodeId : '', recipe.costume ? cp.costumeNodeId : '', recipe.pose ? cp.poseNodeId : '', petReference ? cp.petNodeId : '', petCostume ? cp.petCostumeNodeId : '', ...Object.keys(workflowImages)].filter((id) => id && id !== 'none')
       const combinationError = validateReferenceCombinations(cp.workflowJson, selected)
       if (combinationError) { toast.error(combinationError); setShowAdvanced(true); return }
     }
@@ -436,12 +484,6 @@ function StudioPage() {
         {/* 左栏：参考图、模型参数与 Prompt */}
         <div
           className="flex min-w-0 flex-col gap-4 lg:col-span-7"
-          onDragOver={(e) => {
-            e.preventDefault()
-            setIsDragging(true)
-          }}
-          onDragLeave={() => setIsDragging(false)}
-          onDrop={handleDropFiles}
         >
           {/* 1. 参考图组合 */}
           <Section
@@ -450,14 +492,6 @@ function StudioPage() {
             actions={
               <div className="flex flex-wrap items-center gap-1.5">
                 <Badge variant="secondary" className="text-[11px]">已选 {([recipe.portrait, recipe.costume, recipe.pose].filter(Boolean).length + extraImages.length)}/5</Badge>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  className="hidden"
-                  onChange={handleUploadFiles}
-                />
                 <Button
                   variant="outline"
                   size="sm"
@@ -582,12 +616,13 @@ function StudioPage() {
                       </div>
                       <span className="truncate text-xs">+ 选宠物</span>
                     </Link>
-                    <Button type="button" variant="ghost" size="sm" aria-label="上传宠物参考图" aria-busy={uploadingSlot === 'pet'} disabled={uploadingSlot !== null || randomizingSlot !== null} className="h-12 shrink-0 border-l px-2 text-xs" onClick={() => { uploadSlotRef.current = 'pet'; slotInputRef.current?.click() }}>
+                    <Button type="button" variant="ghost" size="sm" aria-label="上传宠物参考图" aria-busy={uploadingSlot === 'pet'} disabled={uploadingSlot !== null || randomizingSlot !== null || randomizingPetSlot !== null} className="h-12 shrink-0 border-l px-2 text-xs" onClick={() => { uploadSlotRef.current = 'pet'; slotInputRef.current?.click() }}>
                       {uploadingSlot === 'pet' ? <LoaderCircleIcon className="size-3.5 animate-spin motion-reduce:animate-none" /> : <ImagePlusIcon className="size-3.5" />}
                       {uploadingSlot === 'pet' ? '处理中' : '上传'}
                     </Button>
                   </>
                 )}
+                {petReference && petRandomControls('pet_reference', '宠物')}
               </div>
 
               {/* 宠物服装槽 */}
@@ -631,12 +666,13 @@ function StudioPage() {
                       </div>
                       <span className="truncate text-xs">+ 选宠物服装</span>
                     </Link>
-                    <Button type="button" variant="ghost" size="sm" aria-label="上传宠物服装参考图" aria-busy={uploadingSlot === 'pet_costume'} disabled={uploadingSlot !== null || randomizingSlot !== null} className="h-12 shrink-0 border-l px-2 text-xs" onClick={() => { uploadSlotRef.current = 'pet_costume'; slotInputRef.current?.click() }}>
+                    <Button type="button" variant="ghost" size="sm" aria-label="上传宠物服装参考图" aria-busy={uploadingSlot === 'pet_costume'} disabled={uploadingSlot !== null || randomizingSlot !== null || randomizingPetSlot !== null} className="h-12 shrink-0 border-l px-2 text-xs" onClick={() => { uploadSlotRef.current = 'pet_costume'; slotInputRef.current?.click() }}>
                       {uploadingSlot === 'pet_costume' ? <LoaderCircleIcon className="size-3.5 animate-spin motion-reduce:animate-none" /> : <ImagePlusIcon className="size-3.5" />}
                       {uploadingSlot === 'pet_costume' ? '处理中' : '上传'}
                     </Button>
                   </>
                 )}
+                {petCostume && petRandomControls('pet_costume', '宠物服装')}
               </div>
 
               {/* 服装槽 */}
@@ -716,43 +752,7 @@ function StudioPage() {
                     </button>
                     <div className="flex min-h-12 min-w-0 flex-1 flex-col justify-between gap-1">
                       <div className="flex items-center justify-between gap-1">
-                        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                          <span className="shrink-0 text-[11px] text-muted-foreground">姿势</span>
-                          {recipe.pose.source !== 'upload' && (
-                            <div
-                              role="group"
-                              aria-label="切换素体白模或深度图"
-                              className="inline-flex shrink-0 items-center rounded-md border border-border/70 bg-muted/70 p-0.5 text-[10px] leading-none"
-                            >
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (recipe.pose?.useDepth) toggleRecipePoseDepth()
-                                }}
-                                className={`rounded px-1.5 py-0.5 font-medium transition ${
-                                  !recipe.pose.useDepth
-                                    ? 'bg-background text-foreground shadow-xs'
-                                    : 'text-muted-foreground hover:text-foreground'
-                                }`}
-                              >
-                                白模
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (!recipe.pose?.useDepth) toggleRecipePoseDepth()
-                                }}
-                                className={`rounded px-1.5 py-0.5 font-medium transition ${
-                                  recipe.pose.useDepth
-                                    ? 'bg-primary text-primary-foreground shadow-xs'
-                                    : 'text-muted-foreground hover:text-foreground'
-                                }`}
-                              >
-                                深度
-                              </button>
-                            </div>
-                          )}
-                        </div>
+                        <span className="shrink-0 text-[11px] text-muted-foreground">姿势</span>
                       </div>
                       <div
                         className="line-clamp-2 text-xs font-medium leading-snug"
@@ -764,15 +764,15 @@ function StudioPage() {
                   </>
                 ) : (
                   <>
-                    <Link
-                      to="/pet-poses"
-                      className="flex min-h-12 min-w-0 flex-1 items-center gap-2 rounded-lg text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
-                    >
+                    <div className="flex min-h-12 min-w-0 flex-1 items-center gap-2">
                       <div className="flex h-10 w-8 shrink-0 items-center justify-center rounded-lg bg-muted">
                         <PersonStandingIcon className="size-4" />
                       </div>
-                      <span className="truncate text-xs">+ 选姿势</span>
-                    </Link>
+                      <div className="flex min-w-0 flex-1 flex-wrap gap-1.5">
+                        <Link to="/pet-poses" className="rounded-md px-1.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground">+ 宠物姿势</Link>
+                        <Link to="/pet-interactions" className="rounded-md px-1.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground">+ 人宠互动</Link>
+                      </div>
+                    </div>
                     <Button type="button" variant="ghost" size="sm" aria-label="上传姿势参考图" aria-describedby={showReferenceErrors && missingReferences.includes('姿势') ? 'reference-errors' : undefined} aria-busy={uploadingSlot === 'pose'} disabled={uploadingSlot !== null || randomizingSlot !== null} className="h-12 shrink-0 border-l px-2 text-xs" onClick={() => { uploadSlotRef.current = 'pose'; slotInputRef.current?.click() }}>
                       {uploadingSlot === 'pose' ? <LoaderCircleIcon className="size-3.5 animate-spin motion-reduce:animate-none" /> : <ImagePlusIcon className="size-3.5" />}
                       {uploadingSlot === 'pose' ? '处理中' : '上传'}
@@ -783,11 +783,11 @@ function StudioPage() {
               </div>
             </div>
 
-            {/* 宠物参考图列表 + 可视化拖拽/粘贴上传框 */}
+            {/* 保留已有的附加参考图，并允许移除或修改备注 */}
             <div className="space-y-2 pt-1">
-              {extraImages.length > 0 && (
+              {attachmentImages.length > 0 && (
                 <div className="grid min-w-0 grid-cols-1 gap-2 @min-[42rem]/section:grid-cols-3">
-                  {extraImages.map((img, idx) => (
+                  {attachmentImages.map((img, idx) => (
                     <div
                       key={img.id}
                       className="flex items-start gap-2 rounded-xl border border-border/60 bg-background p-1.5"
@@ -798,7 +798,7 @@ function StudioPage() {
                         className="h-11 w-9 shrink-0 rounded-lg object-cover"
                       />
                       <div className="min-w-0 flex-1">
-                        <div className="text-[10px] text-muted-foreground">{img.role === 'pet_reference' ? '宠物' : img.role === 'pet_costume' ? '宠物服装' : `附图 #${idx + 1}`}</div>
+                        <div className="text-[10px] text-muted-foreground">附加参考图 #{idx + 1}</div>
                         <input
                           type="text"
                           value={img.name}
@@ -819,46 +819,6 @@ function StudioPage() {
                 </div>
               )}
 
-              {/* 显式虚线上传/拖拽/粘贴提示区 */}
-                <div
-                onClick={() => fileInputRef.current?.click()}
-                  className="flex cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border border-dashed px-3 py-2.5 text-center transition sm:flex-row sm:justify-between"
-                >
-                <div className="flex items-center gap-2 text-xs">
-                  <ImagePlusIcon className="size-4 shrink-0" />
-                  <span>
-                    {isDragging
-                      ? '松开鼠标添加宠物参考图'
-                      : '添加宠物参考图：点击上传、拖拽图片至此，或直接按 Ctrl+V / ⌘V 粘贴'}
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setShowUrlInput((s) => !s)
-                  }}
-                  className="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium text-primary hover:bg-primary/10"
-                >
-                  <LinkIcon className="size-3" />
-                  输入图片 URL
-                </button>
-              </div>
-
-              {showUrlInput && (
-                <div className="flex items-center gap-2">
-                  <Input
-                    value={extraUrlInput}
-                    onChange={(e) => setExtraUrlInput(e.target.value)}
-                    placeholder="粘贴 https://... 图片地址"
-                    className="bg-background text-xs"
-                    onKeyDown={(e) => e.key === 'Enter' && handleAddUrl()}
-                  />
-                  <Button size="sm" onClick={handleAddUrl}>
-                    添加
-                  </Button>
-                </div>
-              )}
             </div>
           </Section>
 
@@ -1123,6 +1083,20 @@ function StudioPage() {
                         </SelectItem>
                       ))}
                     </SelectContent>
+                  </Select>
+                </Field>
+
+                <Field label="宠物图节点 (LoadImage)">
+                  <Select value={apiConfig.comfyuiParams.petNodeId} onValueChange={(v) => updateComfyUiParams({ petNodeId: v })}>
+                    <SelectTrigger className="w-full text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent><SelectItem value="none">不绑定</SelectItem>{parsedComfyNodes.imageNodes.map((n) => <SelectItem key={n.id} value={n.id} className="text-xs">#{n.id} {n.title}</SelectItem>)}</SelectContent>
+                  </Select>
+                </Field>
+
+                <Field label="宠物服装图节点 (LoadImage)">
+                  <Select value={apiConfig.comfyuiParams.petCostumeNodeId} onValueChange={(v) => updateComfyUiParams({ petCostumeNodeId: v })}>
+                    <SelectTrigger className="w-full text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent><SelectItem value="none">不绑定</SelectItem>{parsedComfyNodes.imageNodes.map((n) => <SelectItem key={n.id} value={n.id} className="text-xs">#{n.id} {n.title}</SelectItem>)}</SelectContent>
                   </Select>
                 </Field>
 
@@ -1475,7 +1449,7 @@ function StudioPage() {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="url">URL</SelectItem>
+                          <SelectItem value="url">自动（本地转 Base64）</SelectItem>
                           <SelectItem value="base64">Base64</SelectItem>
                         </SelectContent>
                       </Select>

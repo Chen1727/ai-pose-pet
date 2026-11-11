@@ -1,8 +1,6 @@
 import { Link, useMatches } from '@tanstack/react-router'
-import { DicesIcon, SparklesIcon } from 'lucide-react'
+import { SparklesIcon } from 'lucide-react'
 import { Fragment } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
-import { costumesQuery, portraitsQuery, posesQuery } from '@/api/gallery'
 import { ThemeToggle } from '@/components/theme/ThemeToggle'
 import {
   Breadcrumb,
@@ -18,27 +16,13 @@ import { SidebarTrigger } from '@/components/ui/sidebar'
 import { useStudio } from '@/store/studioStore'
 
 export function AppHeader() {
-  const { recipe, randomizeRecipe } = useStudio()
-  const qc = useQueryClient()
+  const { recipe } = useStudio()
   const crumbs = useMatches({
     select: (matches) =>
       matches.filter((m) => m.staticData.title).map((m) => ({ title: m.staticData.title!, path: m.pathname })),
   })
 
   const selectedCount = [recipe.portrait, recipe.costume, recipe.pose].filter(Boolean).length + (recipe.extraImages || []).length
-
-  const handleRandom = async () => {
-    const [posesRes, costumes, portraits] = await Promise.all([
-      qc.ensureQueryData(posesQuery),
-      qc.ensureQueryData(costumesQuery),
-      qc.ensureQueryData(portraitsQuery),
-    ])
-    randomizeRecipe({
-      poses: posesRes.items,
-      costumes,
-      portraits,
-    })
-  }
 
   return (
     <header className="app-header @container/header flex min-h-16 shrink-0 items-center gap-2 border-b border-border/60 px-4 sm:px-6">
@@ -64,10 +48,6 @@ export function AppHeader() {
       </Breadcrumb>
 
       <div className="ml-auto flex shrink-0 items-center gap-1 @lg/header:gap-2">
-        <Button variant="outline" size="sm" onClick={handleRandom} className="hidden @3xl/header:inline-flex">
-          <DicesIcon className="size-3.5" />
-          随机捏人
-        </Button>
         <Button size="sm" asChild>
           <Link to="/studio" aria-label={`AI 合成台，已选 ${selectedCount} 项参考图`}>
             <SparklesIcon className="size-3.5" />

@@ -1,8 +1,9 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { Link, useLocation } from '@tanstack/react-router'
-import { CopyIcon, DicesIcon, LoaderCircleIcon, PersonStandingIcon, ShirtIcon, SparklesIcon, Trash2Icon, UserRoundIcon, XIcon } from 'lucide-react'
+import { CopyIcon, DicesIcon, LoaderCircleIcon, PawPrintIcon, PersonStandingIcon, ShirtIcon, SparklesIcon, Trash2Icon, UserRoundIcon, XIcon } from 'lucide-react'
 import { toast } from '@/lib/notifications'
 import { costumesQuery, portraitsQuery, posesQuery } from '@/api/gallery'
+import { petsQuery } from '@/api/pets'
 import { poseThumbPath, referenceImageUrl } from '@/lib/recipeImages'
 import { workflowIdentity } from '@/lib/comfyWorkflowParameters'
 import { Button } from '@/components/ui/button'
@@ -11,9 +12,11 @@ import { useStudio } from '@/store/studioStore'
 
 export function RecipeDock() {
   const { pathname } = useLocation()
-  const { recipe, apiConfig, isGenerating, setPortrait, setCostume, setPose, toggleRecipePoseDepth, clearRecipe, randomizeRecipe } = useStudio()
+  const { recipe, apiConfig, isGenerating, setPortrait, setCostume, setPose, removeExtraImage, clearRecipe, randomizeRecipe } = useStudio()
   const qc = useQueryClient()
   const extraCount = (recipe.extraImages || []).length
+  const petReference = recipe.extraImages?.find((image) => image.role === 'pet_reference')
+  const petCostume = recipe.extraImages?.find((image) => image.role === 'pet_costume')
   const workflowImages = apiConfig.activeProvider === 'comfyui' && recipe.workflowImagesIdentity === workflowIdentity(apiConfig.comfyuiParams.workflowJson) ? Object.values(recipe.workflowImages || {}) : []
   const count = [recipe.portrait, recipe.costume, recipe.pose].filter(Boolean).length + extraCount + workflowImages.length
 
@@ -23,15 +26,17 @@ export function RecipeDock() {
   }
 
   const handleRandom = async () => {
-    const [posesRes, costumes, portraits] = await Promise.all([
+    const [posesRes, costumes, portraits, pets] = await Promise.all([
       qc.ensureQueryData(posesQuery),
       qc.ensureQueryData(costumesQuery),
       qc.ensureQueryData(portraitsQuery),
+      qc.ensureQueryData(petsQuery),
     ])
     randomizeRecipe({
       poses: posesRes.items,
       costumes,
       portraits,
+      pets,
     })
   }
 
@@ -44,7 +49,7 @@ export function RecipeDock() {
   return (
     <div className="sticky bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-30 mx-auto mt-4 w-full max-w-5xl [@media(max-height:30rem)]:static">
       <div className="flex flex-col gap-2 rounded-2xl border border-border/80 bg-card/95 p-2 shadow-lg backdrop-blur-md @3xl/main:flex-row @3xl/main:items-center @3xl/main:justify-between sm:px-3.5 sm:py-2.5">
-        <div className="grid min-w-0 max-w-full flex-1 grid-cols-3 gap-1.5 sm:gap-2">
+        <div className="grid min-w-0 max-w-full flex-1 grid-cols-3 gap-1.5 @md/main:grid-cols-5 sm:gap-2">
           {/* Slot 1: Portrait */}
           <div className="relative flex min-w-0 flex-col items-start gap-1.5 rounded-xl bg-muted/80 p-1.5 @md/main:flex-row @md/main:items-center sm:gap-2 sm:p-2">
             {recipe.portrait ? (
@@ -118,17 +123,6 @@ export function RecipeDock() {
                 />
                 <div className="min-w-0 max-w-full flex-1">
                   <div className="truncate text-[11px] font-medium sm:text-xs" title={recipe.pose.姿势名称}>{recipe.pose.姿势名称}</div>
-                  {recipe.pose.source !== 'upload' && (
-                    <button
-                      type="button"
-                      onClick={toggleRecipePoseDepth}
-                      className="mt-0.5 inline-flex items-center gap-1 rounded bg-background/80 px-1 py-0.5 text-[10px] leading-none text-muted-foreground hover:text-foreground"
-                    >
-                      <span className={!recipe.pose.useDepth ? 'font-semibold text-foreground' : ''}>白模</span>
-                      <span>/</span>
-                      <span className={recipe.pose.useDepth ? 'font-semibold text-primary' : ''}>深度</span>
-                    </button>
-                  )}
                 </div>
                 <button
                   type="button"
@@ -145,6 +139,38 @@ export function RecipeDock() {
                   <PersonStandingIcon className="size-3.5" />
                 </div>
                 <span className="truncate text-[11px] sm:text-xs">姿势</span>
+              </Link>
+            )}
+          </div>
+
+          {/* Slot 4: Pet */}
+          <div className="relative flex min-w-0 flex-col items-start gap-1.5 rounded-xl bg-muted/80 p-1.5 @md/main:flex-row @md/main:items-center sm:gap-2 sm:p-2">
+            {petReference ? (
+              <>
+                <img src={petReference.url} alt={petReference.name} className="h-8 w-7 shrink-0 rounded-md object-cover sm:h-10 sm:w-8" />
+                <div className="min-w-0 max-w-full flex-1"><div className="truncate text-[11px] font-medium sm:text-xs">{petReference.name}</div></div>
+                <button type="button" aria-label="清除宠物参考图" onClick={() => removeExtraImage(petReference.id)} className="absolute top-1 right-1 shrink-0 rounded-full p-0.5 text-muted-foreground hover:text-foreground @md/main:static"><XIcon className="size-3" /></button>
+              </>
+            ) : (
+              <Link to="/pet-breeds" className="flex min-w-0 max-w-full flex-1 items-center gap-1.5 text-muted-foreground hover:text-foreground">
+                <div className="flex h-8 w-7 shrink-0 items-center justify-center rounded-md bg-background/80 sm:h-10 sm:w-8"><PawPrintIcon className="size-3.5" /></div>
+                <span className="truncate text-[11px] sm:text-xs">宠物</span>
+              </Link>
+            )}
+          </div>
+
+          {/* Slot 5: Pet costume */}
+          <div className="relative flex min-w-0 flex-col items-start gap-1.5 rounded-xl bg-muted/80 p-1.5 @md/main:flex-row @md/main:items-center sm:gap-2 sm:p-2">
+            {petCostume ? (
+              <>
+                <img src={petCostume.url} alt={petCostume.name} className="h-8 w-7 shrink-0 rounded-md object-cover sm:h-10 sm:w-8" />
+                <div className="min-w-0 max-w-full flex-1"><div className="truncate text-[11px] font-medium sm:text-xs">{petCostume.name}</div></div>
+                <button type="button" aria-label="清除宠物服装参考图" onClick={() => removeExtraImage(petCostume.id)} className="absolute top-1 right-1 shrink-0 rounded-full p-0.5 text-muted-foreground hover:text-foreground @md/main:static"><XIcon className="size-3" /></button>
+              </>
+            ) : (
+              <Link to="/pet-costumes" className="flex min-w-0 max-w-full flex-1 items-center gap-1.5 text-muted-foreground hover:text-foreground">
+                <div className="flex h-8 w-7 shrink-0 items-center justify-center rounded-md bg-background/80 sm:h-10 sm:w-8"><ShirtIcon className="size-3.5" /></div>
+                <span className="truncate text-[11px] sm:text-xs">宠物服装</span>
               </Link>
             )}
           </div>

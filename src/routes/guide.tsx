@@ -16,13 +16,18 @@ function GuidePage() {
       <Section title="使用流程" className="@lg/section:grid-cols-2">
         <div className="rounded-2xl bg-background p-4">
           <Badge>1. 选参考</Badge>
-          <h3 className="mt-2 text-sm font-semibold">浏览宠物图库</h3>
-          <p className="mt-1 text-xs text-muted-foreground">从宠物姿势库、猫狗种类库或人宠互动图库中打开图片，查看大图或加入合成台。</p>
+          <h3 className="mt-2 text-sm font-semibold">浏览参考图库</h3>
+          <p className="mt-1 text-xs text-muted-foreground">从猫狗种类、宠物姿势、宠物服装、人宠互动、服装穿搭和人像颜值库中选择图片，查看大图或加入合成台。</p>
         </div>
         <div className="rounded-2xl bg-background p-4">
           <Badge>2. 做组合</Badge>
-          <h3 className="mt-2 text-sm font-semibold">准备 4-5 张参考图</h3>
-          <p className="mt-1 text-xs text-muted-foreground">合成台保留人物、服装、姿势三个基础参考位，并支持最多两张宠物参考图。</p>
+          <h3 className="mt-2 text-sm font-semibold">按场景组合参考图</h3>
+          <p className="mt-1 text-xs text-muted-foreground">人物、服装、姿势、宠物和宠物服装齐全时使用五图合成；只有宠物、宠物服装和姿势时使用三图合成；只有宠物和姿势时使用双图合成。</p>
+        </div>
+        <div className="rounded-2xl bg-background p-4">
+          <Badge>3. 开始合成</Badge>
+          <h3 className="mt-2 text-sm font-semibold">确认后生成</h3>
+          <p className="mt-1 text-xs text-muted-foreground">合成台会根据当前参考图自动匹配工作流。人像和宠物同时存在时，姿势优先使用人宠互动图库中的姿势。</p>
         </div>
       </Section>
 

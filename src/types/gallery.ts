@@ -8,6 +8,8 @@ export interface PoseItem {
   分类: string
   姿势名称: string
   角度: string
+  /** 姿势库为该动作生成的结构约束，不包含最终成图风格 */
+  提示词?: string
   缩略图: string
   原图: string
   检索: string
@@ -101,12 +103,14 @@ export interface WorkflowParameterOverrides {
 
 export interface ComfyUiParams {
   parameterOverrides?: WorkflowParameterOverrides
-  workflowPreset: 'qwen2509_3img' | 'qwen2509_2img' | 'qwen21_3img' | 'qwen21_2img' | 'custom'
+  workflowPreset: 'qwen21_5img' | 'qwen21_4img' | 'qwen21_pet_3img' | 'qwen21_pet_2img' | 'qwen2509_3img' | 'qwen2509_2img' | 'qwen21_3img' | 'qwen21_2img' | 'custom'
   workflowJson: string
   promptNodeId: string
   portraitNodeId: string
   costumeNodeId: string
   poseNodeId: string
+  petNodeId: string
+  petCostumeNodeId: string
   stitchedNodeId: string
   randomizeSeed: boolean
   /** 单次生成最长等待秒数 */

@@ -1,22 +1,26 @@
 import { Link } from '@tanstack/react-router'
-import { ArrowRightIcon, DogIcon, HeartHandshakeIcon, PawPrintIcon } from 'lucide-react'
+import { ArrowRightIcon, DogIcon, HeartHandshakeIcon, LayoutGridIcon, PawPrintIcon, ShirtIcon, UserRoundIcon } from 'lucide-react'
 import { useMemo } from 'react'
 import { Button } from '@/components/ui/button'
 import type { PetCategory, PetImage } from '@/types/pet'
 
-export function GalleryOverview({ images, onSelect }: {
+export function GalleryOverview({ images, onSelect, costumeCount = 0, portraitCount = 0 }: {
   images: PetImage[]
   onSelect: (image: PetImage) => void
+  costumeCount?: number
+  portraitCount?: number
 }) {
   const counts = useMemo(() => ({
-    cat: images.filter((image) => image.category === 'cat').length,
-    dog: images.filter((image) => image.category === 'dog').length,
+    breeds: images.filter((image) => image.kind === 'breed').length,
+    poses: images.filter((image) => image.kind === 'pose').length,
+    costumes: images.filter((image) => image.category === 'pet_costume').length,
     interaction: images.filter((image) => image.category === 'interaction').length,
   }), [images])
+  const allCount = images.length + costumeCount + portraitCount
   const recommendations = useMemo(() => {
     const recent = [...images].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
     const picks: PetImage[] = []
-    const categories: PetCategory[] = ['cat', 'dog', 'interaction']
+    const categories: PetCategory[] = ['cat', 'dog', 'pet_costume', 'interaction']
     for (const category of categories) {
       const image = recent.find((item) => item.category === category && !picks.some((pick) => pick.original === item.original))
       if (image) picks.push(image)
@@ -31,16 +35,32 @@ export function GalleryOverview({ images, onSelect }: {
   return <>
     <section className="overview-stats" aria-label="图库数量统计">
       <div className="overview-stat">
+        <span className="overview-stat-icon"><LayoutGridIcon className="size-5" /></span>
+        <div><strong>{allCount.toLocaleString('zh-CN')}</strong><small>全部图库</small></div>
+      </div>
+      <div className="overview-stat">
         <span className="overview-stat-icon"><PawPrintIcon className="size-5" /></span>
-        <div><strong>{counts.cat.toLocaleString('zh-CN')}</strong><small>猫咪参考</small></div>
+        <div><strong>{counts.breeds.toLocaleString('zh-CN')}</strong><small>猫狗种类</small></div>
       </div>
       <div className="overview-stat">
         <span className="overview-stat-icon"><DogIcon className="size-5" /></span>
-        <div><strong>{counts.dog.toLocaleString('zh-CN')}</strong><small>狗狗参考</small></div>
+        <div><strong>{counts.poses.toLocaleString('zh-CN')}</strong><small>宠物姿势</small></div>
+      </div>
+      <div className="overview-stat">
+        <span className="overview-stat-icon"><ShirtIcon className="size-5" /></span>
+        <div><strong>{counts.costumes.toLocaleString('zh-CN')}</strong><small>宠物服装</small></div>
       </div>
       <div className="overview-stat">
         <span className="overview-stat-icon"><HeartHandshakeIcon className="size-5" /></span>
         <div><strong>{counts.interaction.toLocaleString('zh-CN')}</strong><small>人宠互动</small></div>
+      </div>
+      <div className="overview-stat">
+        <span className="overview-stat-icon"><ShirtIcon className="size-5" /></span>
+        <div><strong>{costumeCount.toLocaleString('zh-CN')}</strong><small>服装穿搭</small></div>
+      </div>
+      <div className="overview-stat">
+        <span className="overview-stat-icon"><UserRoundIcon className="size-5" /></span>
+        <div><strong>{portraitCount.toLocaleString('zh-CN')}</strong><small>人像颜值</small></div>
       </div>
     </section>
     {recommendations.length > 0 && <section className="recommendation-strip" aria-labelledby="recommendation-title">
@@ -48,7 +68,7 @@ export function GalleryOverview({ images, onSelect }: {
         <div>
           <span className="section-kicker">FIND YOUR INSPIRATION</span>
           <h2 id="recommendation-title">推荐参考图</h2>
-          <p>从猫咪、狗狗和人宠互动中寻找下一份灵感。</p>
+          <p>从猫狗种类、宠物姿势、宠物服装和人宠互动中寻找下一份灵感。</p>
         </div>
         <Button variant="outline" size="sm" asChild>
           <Link to="/pet-breeds">进入猫狗种类库 <ArrowRightIcon className="size-3.5" /></Link>

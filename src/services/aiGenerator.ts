@@ -2,6 +2,10 @@ import type { ApiConfig, ExtraReferenceImage, ImageProviderId, RecipeState } fro
 import { applyWorkflowOverrides, getWorkflowImages, validateReferenceCombinations, workflowIdentity, type ComfyObjectInfo } from '@/lib/comfyWorkflowParameters'
 import { poseImagePath, referenceImageUrl } from '@/lib/recipeImages'
 import qwen2509ThreeImageWorkflow from '@/workflows/qwen_image_edit_2509_3img.api.json'
+import qwen21PetThreeImageWorkflow from '@/workflows/qwen_image_21_pet_3img.api.json'
+import qwen21FiveImageWorkflow from '@/workflows/qwen_image_21_5img.api.json'
+import qwen21FourImageWorkflow from '@/workflows/qwen_image_21_4img.api.json'
+import qwen21PetTwoImageWorkflow from '@/workflows/qwen_image_21_pet_2img.api.json'
 
 export interface ProviderModelOption {
   value: string
@@ -142,6 +146,10 @@ export const STYLE_PRESETS: Record<string, { label: string; prompt: string }> = 
     label: '赛博朋克霓虹',
     prompt: '赛博朋克科幻视觉风格，雨夜霓虹冷暖双色轮廓光，未来感材质反光与电影级氛围。',
   },
+  poster: {
+    label: '商业海报风格',
+    prompt: '高质感商业海报视觉，主体突出，构图有明确视觉中心和层次感，强烈但协调的色彩对比，电影级轮廓光与戏剧化光影，精致清晰的主体细节，适合宣传海报的完整画面，不添加任何文字、标志或水印。',
+  },
   concept_sheet: {
     label: '角色设定集立绘（纯白底）',
     prompt: '标准角色设定集全身立绘，纯白干净无杂物背景，均匀漫反射布光，清晰展示全身服装结构与配饰细节。',
@@ -152,6 +160,14 @@ export const STYLE_PRESETS: Record<string, { label: string; prompt: string }> = 
 // 用自然语言逐项描述（人物 / 服装 / 姿势），实测比堆砌要点更能让多图编辑模型还原服装、避免照搬人体模型线条
 const PHOTO_STYLES = new Set(['realistic', 'fashion', 'film'])
 
+function poseStructurePrompt(prompt?: string): string {
+  const text = prompt?.trim()
+  if (!text) return ''
+  // 姿势数据前半段描述线稿风格，成图时只保留后面的动作与镜头约束。
+  const constraint = text.split('不要文字。')[1]?.trim() || text
+  return constraint.replace(/不要文字。?\s*$/u, '').trim()
+}
+
 export function buildRecipePrompt(recipe: RecipeState, stylePreset = 'realistic', workflowImages: ExtraReferenceImage[] = []): string {
   const styleInfo = STYLE_PRESETS[stylePreset] ?? STYLE_PRESETS.realistic
   const isPhoto = PHOTO_STYLES.has(stylePreset)
@@ -159,6 +175,7 @@ export function buildRecipePrompt(recipe: RecipeState, stylePreset = 'realistic'
   const clauses: string[] = []
   let idx = 1
   let costumeIdx = 0
+  let poseReferenceIdx = 0
 
   workflowImages.filter((image) => image.role === 'character_sheet').forEach(() => {
     clauses.push('• 角色设定参考：提供的设定集展示同一角色的多个视角与细节，不是多个不同人物。保持角色的脸型、五官、发型、发色、肤色及服装配饰一致；只把它作为角色参考，成品布局遵循当前工作流的输出设置。')
@@ -172,10 +189,11 @@ export function buildRecipePrompt(recipe: RecipeState, stylePreset = 'realistic'
         : recipe.portrait.发长
     const skin = '人物的肤色必须与图一人物一致，所有裸露皮肤（包括服装镂空处露出的皮肤）必须与脸部肤色统一，统一后的肤色与质感按风格要求呈现。'
     const outfit = recipe.costume ? '' : '保留图1人物原有可见服装与配饰，不复制姿势参考图的服装或白模外观。'
+    const posePriority = recipe.pose ? '人物的动作、姿势、朝向和构图必须以姿势参考图为准，图中人物参考只用于身份与外观。' : ''
     clauses.push(
       recipe.portrait.source === 'upload'
-        ? `• 人物：图${idx}中的人物，保持其脸型、五官、发型和发色一致。${skin}${outfit}`
-        : `• 人物：图${idx}中的人物，保持其脸型、五官、发型（${hairDesc}）和发色一致。${skin}${outfit}`
+        ? `• 人物：图${idx}中的人物，保持其脸型、五官、发型和发色一致。${skin}${posePriority}${outfit}`
+        : `• 人物：图${idx}中的人物，保持其脸型、五官、发型（${hairDesc}）和发色一致。${skin}${posePriority}${outfit}`
     )
     idx++
   }
@@ -189,14 +207,28 @@ export function buildRecipePrompt(recipe: RecipeState, stylePreset = 'realistic'
     idx++
   }
   if (recipe.pose) {
+    poseReferenceIdx = idx
     const wear = costumeIdx ? `，穿着图${costumeIdx}的服装` : ''
     const body = isPhoto
       ? `最终画面中的人物是真人，皮肤真实自然${wear}`
       : `人物的肤色与质感按风格要求呈现${wear}`
+    const catalogPoseConstraint = poseStructurePrompt(recipe.pose.提示词)
+    const poseSearchText = `${recipe.pose.体系} ${recipe.pose.分类} ${recipe.pose.姿势名称} ${recipe.pose.检索} ${catalogPoseConstraint}`
+    const isInteractionPose = /人宠互动|interaction/i.test(poseSearchText)
+    const hasMutualGazeCue = isInteractionPose && /对视|互看|互望|相视|对望|看向对方|看向彼此/.test(poseSearchText)
+    const interactionGazeInstruction = hasMutualGazeCue
+      ? '图中人物与宠物明确互相对视：人物头部和眼睛朝向宠物，宠物头部和眼睛朝向人物；不要让双方同时直视镜头。'
+      : '严格保持图中的视线关系；如果图中没有互相对视，不要自行新增对视，也不要把双方都改成正面看镜头。'
+    const poseStructureInstruction = `图${idx}是姿势与构图的最高优先级控制参考，必须尽可能逐项复刻其中的人物和宠物数量、相对位置、身体动作、头部朝向、脸部朝向、视线方向、肢体弯曲和镜头构图；只替换人物与宠物的外观、服装和材质。不得把人物或宠物站直、摆正、移位，也不得把侧面或斜侧改成正面。`
+    const catalogPoseInstruction = catalogPoseConstraint ? `姿势库结构约束（只执行动作、方向、数量和镜头要求，不执行线稿画风）：${catalogPoseConstraint}` : ''
     clauses.push(
       recipe.pose.source === 'upload'
-        ? `• 姿势：按照图${idx}中的人物动作和镜头角度摆姿势；仅参考姿势与构图，不复制图${idx}人物的外观与服装，${body}。`
-        : `• 姿势：按照图${idx}中人体模型的动作和镜头角度摆姿势（${recipe.pose.姿势名称}，${recipe.pose.角度}）；图${idx}只是动作示意，${body}。`
+        ? isInteractionPose
+          ? `• 人宠互动姿势：${poseStructureInstruction}${catalogPoseInstruction}${interactionGazeInstruction}不复制图${idx}人物的外观与服装，${body}。`
+          : `• 姿势：${poseStructureInstruction}${catalogPoseInstruction}不复制图${idx}人物的外观与服装，${body}。`
+        : isInteractionPose
+          ? `• 人宠互动姿势：${poseStructureInstruction}${catalogPoseInstruction}姿势名称为“${recipe.pose.姿势名称}”，参考角度为“${recipe.pose.角度}”。${interactionGazeInstruction}${body}。`
+          : `• 姿势：${poseStructureInstruction}${catalogPoseInstruction}姿势名称为“${recipe.pose.姿势名称}”，参考角度为“${recipe.pose.角度}”。${body}。`
     )
     idx++
   }
@@ -210,7 +242,7 @@ export function buildRecipePrompt(recipe: RecipeState, stylePreset = 'realistic'
   for (const extra of recipe.extraImages || []) {
     clauses.push(
       extra.role === 'pet_reference'
-        ? `• 宠物参考：参考图${idx}中的${extra.name || '猫狗形态、毛色与体态'}，保持宠物的种类、体型、毛色和关键特征一致。`
+        ? `• 宠物参考：参考图${idx}中的${extra.name || '猫狗形态、毛色与体态'}，仅用于确定宠物的种类、体型、毛色和外观特征。${poseReferenceIdx ? `宠物的数量、姿势、位置、朝向、视线以及与人物的互动关系必须以图${poseReferenceIdx}为准。` : ''}`
         : extra.role === 'pet_costume'
           ? `• 宠物服装参考：参考图${idx}中的服装、配饰、颜色与材质，为宠物匹配合适的穿戴效果。`
         : `• 附加参考：融合图${idx}（${extra.name || '补充元素'}）中的元素、配饰、背景或光影细节。`
@@ -224,6 +256,7 @@ export function buildRecipePrompt(recipe: RecipeState, stylePreset = 'realistic'
 
   const lines = [
     `请根据${workflowImages.some((image) => image.role === 'character_sheet') ? '提供的角色设定参考' : `提供的 ${idx - 1} 张参考图`}，生成一张完整的${(recipe.extraImages || []).some((image) => image.role === 'pet_reference' || image.role === 'pet_costume') ? '宠物或人宠互动画面' : faceless ? '人物穿搭展示图' : isPhoto ? '真实人物照片' : '人物图像'}：`,
+    ...(recipe.pose ? ['• 最高优先级：姿势参考图决定最终画面中的人物和宠物数量、动作、相对位置、朝向、视线与构图；其他参考图只用于替换外观、服装和材质。'] : []),
     ...clauses,
   ]
   if (styleInfo.prompt) {
@@ -356,6 +389,18 @@ export function toPublicHttpsUrl(src: string): string {
   return typeof window !== 'undefined' ? `${window.location.origin}/${clean}` : `/${clean}`
 }
 
+function isLocalOnlyImage(src: string): boolean {
+  if (src.startsWith('data:image/')) return false
+  if (src.startsWith('blob:')) return true
+  const url = new URL(referenceImageUrl(src), window.location.origin)
+  const host = url.hostname.toLowerCase()
+  return url.protocol === 'file:' ||
+    host === 'localhost' || host.endsWith('.localhost') || host === '[::1]' ||
+    /^(127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host) ||
+    host.endsWith('.local') ||
+    (url.origin === window.location.origin && url.protocol === 'http:')
+}
+
 async function srcToPngDataUrl(src: string): Promise<string> {
   if (src.startsWith('data:image/')) return src
   const img = await loadImage(src)
@@ -391,7 +436,48 @@ async function smartFetch(
     method: init.method || 'POST',
     headers,
     body: init.body,
+    signal: init.signal,
   })
+}
+
+export async function testProviderConnection(provider: ImageProviderId, config: ApiConfig): Promise<string> {
+  const endpoint = config.providers[provider]
+  if (provider === 'comfyui') return testComfyConnection(endpoint.baseUrl, endpoint.apiKey)
+
+  const apiKey = endpoint.apiKey.trim()
+  if (!apiKey) throw new Error('请先填写 API Key')
+  const baseUrl = (endpoint.baseUrl.trim() || PROVIDER_META[provider].defaultBaseUrl).replace(/\/+$/, '')
+  const paths: Record<Exclude<ImageProviderId, 'comfyui'>, string> = {
+    gemini: '/v1beta/models',
+    gpt: '/v1/models',
+    qwen: '/compatible-mode/v1/models',
+    doubao: '/api/v3/models',
+  }
+  const path = paths[provider]
+  const url = `${baseUrl}${baseUrl.endsWith(path.replace(/\/models$/, '')) ? '/models' : path}`
+  const headers = new Headers(provider === 'gemini'
+    ? { 'x-goog-api-key': apiKey }
+    : { Authorization: `Bearer ${apiKey}` })
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 10000)
+  let response: Response
+  try {
+    response = await smartFetch(url, { method: 'GET', headers, signal: controller.signal }, config.useProxy)
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error('连接超时，请检查地址和网络')
+    throw new Error(`无法连接接口，请检查地址、网络及跨域设置：${error instanceof Error ? error.message : '请求失败'}`)
+  } finally {
+    clearTimeout(timer)
+  }
+  const result = await readJsonSafe(response)
+  if (!response.ok) {
+    const detail = result?.error?.message || result?.message || result?._raw
+    throw new Error(`HTTP ${response.status}${detail ? `：${String(detail).slice(0, 180)}` : ''}`)
+  }
+  if (!Array.isArray(result?.data) && !Array.isArray(result?.models)) {
+    throw new Error('接口有响应，但未返回模型列表；请检查 Base URL 是否指向正确的服务')
+  }
+  return '连接与 API Key 验证通过；未测试当前模型的图片生成能力'
 }
 
 function extractUniversalImage(json: any): string | null {
@@ -449,13 +535,15 @@ function extractUniversalImage(json: any): string | null {
 type ComfyNode = { class_type: string; inputs: Record<string, any>; _meta?: { title?: string; studio?: { imageRole?: string } } }
 type ComfyWorkflow = Record<string, ComfyNode>
 
-export type ComfyPresetId = 'qwen2509_3img' | 'qwen2509_2img' | 'qwen21_3img' | 'qwen21_2img'
+export type ComfyPresetId = 'qwen21_5img' | 'qwen21_4img' | 'qwen21_pet_3img' | 'qwen21_pet_2img' | 'qwen2509_3img' | 'qwen2509_2img' | 'qwen21_3img' | 'qwen21_2img'
 
 export interface ComfyNodeMappings {
   promptNodeId: string
   portraitNodeId: string
   costumeNodeId: string
   poseNodeId: string
+  petNodeId: string
+  petCostumeNodeId: string
   stitchedNodeId: string
 }
 
@@ -489,6 +577,28 @@ export function comfyCandidateUrls(current = ''): string[] {
 
 function cloneWorkflow<T>(wf: T): T {
   return JSON.parse(JSON.stringify(wf))
+}
+
+function detachUnboundCoreImageNodes(workflow: ComfyWorkflow, mappings: ComfyNodeMappings) {
+  const slots = [
+    { nodeId: mappings.portraitNodeId, pattern: /人像|人物|portrait|face|person/i },
+    { nodeId: mappings.costumeNodeId, pattern: /服装|衣|穿搭|costume|cloth|outfit/i },
+    { nodeId: mappings.poseNodeId, pattern: /姿势|动作|骨架|pose/i },
+    { nodeId: mappings.petNodeId, pattern: /宠物参考|宠物|pet|animal/i },
+    { nodeId: mappings.petCostumeNodeId, pattern: /宠物服装|pet.?costume|animal.?cloth/i },
+  ]
+  const mapped = new Set(Object.values(mappings).filter((id) => id && id !== 'none'))
+  const unboundIds = Object.entries(workflow)
+    .filter(([id, node]) => !mapped.has(id) && /LoadImage/i.test(node.class_type) && slots.some((slot) => slot.nodeId === 'none' && slot.pattern.test(node._meta?.title || '')))
+    .map(([id]) => id)
+  for (const nodeId of unboundIds) {
+    for (const node of Object.values(workflow)) {
+      for (const [input, value] of Object.entries(node.inputs || {})) {
+        if (Array.isArray(value) && value[0] === nodeId) delete node.inputs[input]
+      }
+    }
+    delete workflow[nodeId]
+  }
 }
 
 // 双图版：图1 = 人物（含服装），图2 = 姿势（姿势图只送入视觉语言编码器，不作为像素参考）
@@ -592,31 +702,51 @@ function buildQwen21Workflow(threeImages: boolean): ComfyWorkflow {
   return wf
 }
 
-export const DEFAULT_COMFY_PRESET: ComfyPresetId = 'qwen2509_3img'
+export const DEFAULT_COMFY_PRESET: ComfyPresetId = 'qwen21_5img'
 
 export const COMFYUI_WORKFLOW_TEMPLATES: Record<
   ComfyPresetId,
   { label: string; workflow: ComfyWorkflow; defaults: ComfyNodeMappings }
 > = {
+  qwen21_5img: {
+    label: 'Qwen-Image 2.1 五图合成（人像+服装+姿势+宠物+宠物服装）· 默认',
+    workflow: qwen21FiveImageWorkflow as ComfyWorkflow,
+    defaults: { promptNodeId: '9', portraitNodeId: '1', costumeNodeId: '2', poseNodeId: '3', petNodeId: '13', petCostumeNodeId: '14', stitchedNodeId: 'none' },
+  },
+  qwen21_4img: {
+    label: 'Qwen-Image 2.1 四图合成（人像+服装+姿势+宠物）· 自动匹配',
+    workflow: qwen21FourImageWorkflow as ComfyWorkflow,
+    defaults: { promptNodeId: '9', portraitNodeId: '1', costumeNodeId: '2', poseNodeId: '3', petNodeId: '13', petCostumeNodeId: 'none', stitchedNodeId: 'none' },
+  },
+  qwen21_pet_3img: {
+    label: 'Qwen-Image 2.1 三图合成（宠物+宠物服装+姿势）· 自动匹配',
+    workflow: qwen21PetThreeImageWorkflow as ComfyWorkflow,
+    defaults: { promptNodeId: '9', portraitNodeId: 'none', costumeNodeId: 'none', poseNodeId: '3', petNodeId: '1', petCostumeNodeId: '2', stitchedNodeId: 'none' },
+  },
+  qwen21_pet_2img: {
+    label: 'Qwen-Image 2.1 双图合成（宠物+姿势）· 自动匹配',
+    workflow: qwen21PetTwoImageWorkflow as ComfyWorkflow,
+    defaults: { promptNodeId: '9', portraitNodeId: 'none', costumeNodeId: 'none', poseNodeId: '2', petNodeId: '1', petCostumeNodeId: 'none', stitchedNodeId: 'none' },
+  },
   qwen2509_3img: {
     label: 'Qwen Image Edit 2509 三图合成（人像+服装+姿势）· 推荐',
     workflow: qwen2509ThreeImageWorkflow as ComfyWorkflow,
-    defaults: { promptNodeId: '12', portraitNodeId: '1', costumeNodeId: '2', poseNodeId: '3', stitchedNodeId: 'none' },
+    defaults: { promptNodeId: '12', portraitNodeId: '1', costumeNodeId: '2', poseNodeId: '3', petNodeId: 'none', petCostumeNodeId: 'none', stitchedNodeId: 'none' },
   },
   qwen2509_2img: {
     label: 'Qwen Image Edit 2509 双图姿态迁移（人物+姿势）',
     workflow: buildQwen2509TwoImage(),
-    defaults: { promptNodeId: '12', portraitNodeId: '1', costumeNodeId: 'none', poseNodeId: '3', stitchedNodeId: 'none' },
+    defaults: { promptNodeId: '12', portraitNodeId: '1', costumeNodeId: 'none', poseNodeId: '3', petNodeId: 'none', petCostumeNodeId: 'none', stitchedNodeId: 'none' },
   },
   qwen21_3img: {
     label: 'Qwen-Image 2.1 三图合成（需另装 2.1 模型）',
     workflow: buildQwen21Workflow(true),
-    defaults: { promptNodeId: '9', portraitNodeId: '1', costumeNodeId: '2', poseNodeId: '3', stitchedNodeId: 'none' },
+    defaults: { promptNodeId: '9', portraitNodeId: '1', costumeNodeId: '2', poseNodeId: '3', petNodeId: 'none', petCostumeNodeId: 'none', stitchedNodeId: 'none' },
   },
   qwen21_2img: {
     label: 'Qwen-Image 2.1 双图姿态迁移（需另装 2.1 模型）',
     workflow: buildQwen21Workflow(false),
-    defaults: { promptNodeId: '9', portraitNodeId: '1', costumeNodeId: 'none', poseNodeId: '2', stitchedNodeId: 'none' },
+    defaults: { promptNodeId: '9', portraitNodeId: '1', costumeNodeId: 'none', poseNodeId: '2', petNodeId: 'none', petCostumeNodeId: 'none', stitchedNodeId: 'none' },
   },
 }
 
@@ -690,6 +820,8 @@ export function autoDetectComfyMappings(workflowJson: string): ComfyNodeMappings
   let portraitNodeId = 'none'
   let costumeNodeId = 'none'
   let poseNodeId = 'none'
+  let petNodeId = 'none'
+  let petCostumeNodeId = 'none'
   let stitchedNodeId = 'none'
 
   const posPrompt =
@@ -699,7 +831,13 @@ export function autoDetectComfyMappings(workflowJson: string): ComfyNodeMappings
   const usedIds = new Set<string>()
   const slotImages = parsed.imageNodes.filter((node) => node.role !== 'character_sheet')
   for (const n of slotImages) {
-    if (/人像|脸|人物|portrait|face|person/i.test(n.title) && portraitNodeId === 'none') {
+    if (/宠物服装|pet.?costume|animal.?cloth/i.test(n.title) && petCostumeNodeId === 'none') {
+      petCostumeNodeId = n.id
+      usedIds.add(n.id)
+    } else if (/宠物|pet|animal/i.test(n.title) && petNodeId === 'none') {
+      petNodeId = n.id
+      usedIds.add(n.id)
+    } else if (/人像|脸|人物|portrait|face|person/i.test(n.title) && portraitNodeId === 'none') {
       portraitNodeId = n.id
       usedIds.add(n.id)
     } else if (/服装|衣|穿搭|costume|cloth|outfit/i.test(n.title) && costumeNodeId === 'none') {
@@ -718,8 +856,10 @@ export function autoDetectComfyMappings(workflowJson: string): ComfyNodeMappings
   if (portraitNodeId === 'none' && remaining[0]) portraitNodeId = remaining.shift()!.id
   if (costumeNodeId === 'none' && remaining[0]) costumeNodeId = remaining.shift()!.id
   if (poseNodeId === 'none' && remaining[0]) poseNodeId = remaining.shift()!.id
+  if (petNodeId === 'none' && remaining[0]) petNodeId = remaining.shift()!.id
+  if (petCostumeNodeId === 'none' && remaining[0]) petCostumeNodeId = remaining.shift()!.id
 
-  return { promptNodeId, portraitNodeId, costumeNodeId, poseNodeId, stitchedNodeId }
+  return { promptNodeId, portraitNodeId, costumeNodeId, poseNodeId, petNodeId, petCostumeNodeId, stitchedNodeId }
 }
 
 // ---------------------------------------------------------------------------
@@ -1371,13 +1511,15 @@ async function generateWithComfyUi(params: {
   report({ stage: 'check', message: '正在检查 ComfyUI 服务与模型…' })
   await testComfyConnection(baseUrl, apiKey)
   const schemas = await fetchComfyObjectInfo(baseUrl, apiKey, cp.workflowJson)
-  const extraImageNodes = getWorkflowImages(cp.workflowJson, [cp.portraitNodeId, cp.costumeNodeId, cp.poseNodeId, cp.stitchedNodeId], schemas)
+  const extraImageNodes = getWorkflowImages(cp.workflowJson, [cp.portraitNodeId, cp.costumeNodeId, cp.poseNodeId, cp.petNodeId, cp.petCostumeNodeId, cp.stitchedNodeId], schemas)
   const extraImages = recipe.workflowImagesIdentity === workflowIdentity(cp.workflowJson) ? recipe.workflowImages || {} : {}
   const selectedJson = applyWorkflowOverrides(cp.workflowJson, cp.parameterOverrides, schemas)
   const check = await checkComfyWorkflow(baseUrl, apiKey, selectedJson, [
     cp.portraitNodeId,
     cp.costumeNodeId,
     cp.poseNodeId,
+    cp.petNodeId,
+    cp.petCostumeNodeId,
     cp.stitchedNodeId,
     ...extraImageNodes.filter((node) => extraImages[node.nodeId]?.url || (node.optional && node.role === 'character_sheet')).map((node) => node.nodeId),
   ], schemas)
@@ -1385,6 +1527,8 @@ async function generateWithComfyUi(params: {
     throw new Error(`[ComfyUI] 工作流与本机不匹配：\n${check.errors.join('\n')}`)
   }
   const workflow: ComfyWorkflow = JSON.parse(check.fixedJson ?? selectedJson)
+  // 不绑定核心图片节点时，同时移除其连线，避免 ComfyUI 继续校验旧的占位图片。
+  detachUnboundCoreImageNodes(workflow, cp)
 
   // 1. 按映射槽位上传参考图并注入节点
   const slotUploads: Array<{ nodeId: string; src: string | null; prefix: string; label: string }> = [
@@ -1405,6 +1549,18 @@ async function generateWithComfyUi(params: {
       src: recipe.pose ? poseImagePath(recipe.pose) : null,
       prefix: 'studio_pose',
       label: '姿势',
+    },
+    {
+      nodeId: cp.petNodeId,
+      src: recipe.extraImages?.find((image) => image.role === 'pet_reference')?.url || null,
+      prefix: 'studio_pet',
+      label: '宠物',
+    },
+    {
+      nodeId: cp.petCostumeNodeId,
+      src: recipe.extraImages?.find((image) => image.role === 'pet_costume')?.url || null,
+      prefix: 'studio_pet_costume',
+      label: '宠物服装',
     },
   ]
   const combinationError = validateReferenceCombinations(cp.workflowJson, [
@@ -1568,9 +1724,9 @@ export async function generateCharacterImage(params: {
     (provider === 'gemini' && config.geminiParams.endpointMode === 'native') ||
     (provider === 'gpt' && config.gptParams.endpointMode === 'images_edits')
 
-  const imageRefs: string[] = needBase64
-    ? await Promise.all(rawSources.map(srcToPngDataUrl))
-    : rawSources.map(toPublicHttpsUrl)
+  const imageRefs = await Promise.all(rawSources.map((src) =>
+    needBase64 || isLocalOnlyImage(src) ? srcToPngDataUrl(src) : toPublicHttpsUrl(src)
+  ))
 
   const allImageRefs: string[] = config.sendStitchedSheet
     ? [...imageRefs, await stitchRecipeCanvas(recipe)]
