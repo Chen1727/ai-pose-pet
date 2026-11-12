@@ -130,7 +130,8 @@ const comfyProxy = {
 }
 
 export default defineConfig({
-  publicDir: false,
+  // Keep the small brand assets in public so the favicon and sidebar can share them.
+  publicDir: 'public',
   plugins: [
     localAssetsAndProxyPlugin(),
     tanstackRouter({ target: 'react', autoCodeSplitting: true }),

@@ -1,6 +1,6 @@
 import { Link, useLocation } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
-import { CatIcon, ExternalLinkIcon, SparklesIcon } from 'lucide-react'
+import { ExternalLinkIcon, SparklesIcon } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import {
   Sidebar,
@@ -43,9 +43,9 @@ export function AppSidebar() {
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild>
               <Link to="/">
-                <div className="flex aspect-square size-8 items-center justify-center rounded-xl bg-[#d66f4c] text-white shadow-sm">
-                  <CatIcon className="size-4" />
-                </div>
+                <span className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-xl" aria-hidden="true">
+                  <img className="size-16 max-w-none shrink-0 object-contain" src="/logo-mark.png" alt="" />
+                </span>
                 <div className="grid flex-1 text-left leading-tight">
                   <span className="truncate text-base font-semibold tracking-wider">爪迹灵感库</span>
                   <span className="truncate text-[10px] tracking-wide text-sidebar-foreground/65">PAW ARCHIVE · 猫狗与人宠参考</span>

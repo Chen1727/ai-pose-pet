@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 112" role="img" aria-labelledby="title desc">
+  <title id="title">爪迹灵感库</title>
+  <desc id="desc">爪迹灵感库透明狗爪品牌标志和 PAW ARCHIVE 副标题</desc>
+  <image href="logo-mark.png" x="0" y="0" width="112" height="112" preserveAspectRatio="xMidYMid meet"/>
+  <g fill="#5A3828">
+    <text x="144" y="57" font-family="'PingFang SC','Microsoft YaHei','Noto Sans SC',sans-serif" font-size="39" font-weight="700" letter-spacing="5">爪迹灵感库</text>
+    <text x="147" y="84" font-family="Inter,Arial,sans-serif" font-size="13" font-weight="700" letter-spacing="3.2" fill="#A56A36">PAW ARCHIVE · 猫狗与人宠参考</text>
+  </g>
+</svg>
