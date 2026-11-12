@@ -181,6 +181,7 @@ function StudioPage() {
   const prompt = customPrompt ?? defaultPrompt
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [stitchModalUrl, setStitchModalUrl] = useState<string | null>(null)
+  const [stitching, setStitching] = useState(false)
   const [zoomImageUrl, setZoomImageUrl] = useState<string | null>(null)
   const [showComfyJsonModal, setShowComfyJsonModal] = useState(false)
   const [comfyCheck, setComfyCheck] = useState<(ComfyCheckResult & { info?: string }) | null>(null)
@@ -465,11 +466,15 @@ function StudioPage() {
   </div>
 
   const handleOpenStitchModal = async () => {
+    if (stitching) return
+    setStitching(true)
     try {
       const url = await stitchRecipeCanvas(recipe)
       setStitchModalUrl(url)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '拼图失败')
+    } finally {
+      setStitching(false)
     }
   }
 
@@ -526,13 +531,16 @@ function StudioPage() {
                 </Button>
                 {hasAnyRef && hasStitchRefs && (
                   <Button
+                    type="button"
                     variant="ghost"
                     size="sm"
                     className="h-8 px-2.5 text-xs"
+                    disabled={stitching}
+                    aria-busy={stitching}
                     onClick={handleOpenStitchModal}
                   >
-                    <LayoutGridIcon className="size-3.5" />
-                    参考拼图
+                    {stitching ? <LoaderCircleIcon className="size-3.5 animate-spin motion-reduce:animate-none" /> : <LayoutGridIcon className="size-3.5" />}
+                    {stitching ? '拼图中…' : '参考拼图'}
                   </Button>
                 )}
               </div>

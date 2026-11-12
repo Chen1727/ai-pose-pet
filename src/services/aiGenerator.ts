@@ -288,12 +288,23 @@ export function fileToDataUrl(file: File): Promise<string> {
   })
 }
 
-function loadImage(src: string): Promise<HTMLImageElement> {
+function loadImage(src: string, timeoutMs = 15000): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image()
     img.crossOrigin = 'anonymous'
-    img.onload = () => resolve(img)
-    img.onerror = () => reject(new Error(`加载图片失败: ${src}`))
+    const timer = window.setTimeout(() => {
+      img.onload = null
+      img.onerror = null
+      reject(new Error(`加载参考图超时，请检查图片地址或网络：${src.slice(0, 100)}`))
+    }, timeoutMs)
+    img.onload = () => {
+      window.clearTimeout(timer)
+      resolve(img)
+    }
+    img.onerror = () => {
+      window.clearTimeout(timer)
+      reject(new Error(`加载参考图失败，请检查图片地址或网络：${src.slice(0, 100)}`))
+    }
     img.src = compositionImageUrl(src)
   })
 }
