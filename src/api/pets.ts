@@ -6,6 +6,7 @@ const PET_LIBRARY_IDS = ['pet-breeds', 'pet-poses', 'pet-costumes', 'pet-interac
 
 type GalleryViewResponse = {
   id: string
+  image_id: number
   label: string
   thumbnail: string
   original: string
@@ -54,6 +55,12 @@ function mapGalleryItem(item: GalleryItemResponse): PetImage {
     : item.library_id === 'pet-costumes'
       ? 'pet_costume'
       : item.species === 'cat' || item.species === 'dog' ? item.species : 'dog'
+  const views = item.views.map((view) => ({
+    id: view.id,
+    label: view.label,
+    thumbnail: `/pet-api/api/gallery/assets/${view.image_id}`,
+    original: `/pet-api/api/gallery/assets/${view.image_id}`,
+  }))
   return {
     id: item.id,
     title: item.title,
@@ -63,9 +70,9 @@ function mapGalleryItem(item: GalleryItemResponse): PetImage {
     type: item.type,
     subtitle: item.subtitle,
     tags: item.tags,
-    thumbnail: item.thumbnail,
-    original: item.original,
-    views: item.views,
+    thumbnail: views[0]?.thumbnail || item.thumbnail,
+    original: views[0]?.original || item.original,
+    views,
     createdAt: Date.parse(item.created_at) || 0,
     source: 'upload',
   }

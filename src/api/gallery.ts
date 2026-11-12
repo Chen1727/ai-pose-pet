@@ -5,6 +5,7 @@ const PET_API_BASE = (import.meta.env.VITE_PET_API_URL || '/pet-api').replace(/\
 
 type GalleryViewResponse = {
   id: string
+  image_id: number
   label: string
   thumbnail: string
   original: string
@@ -49,6 +50,10 @@ async function fetchGallery(libraryId: string): Promise<GalleryItemResponse[]> {
     if (items.length >= result.total || result.items.length === 0) break
   }
   return items
+}
+
+function assetUrl(view: GalleryViewResponse): string {
+  return `/pet-api/api/gallery/assets/${view.image_id}`
 }
 
 export function galleryFacetsQuery(libraryId: GalleryLibraryId) {
@@ -124,8 +129,8 @@ export const posesQuery = queryOptions({
       分类: group.category,
       姿势名称: group.title,
       角度: view.label,
-      缩略图: view.thumbnail,
-      原图: view.original,
+      缩略图: assetUrl(view),
+      原图: assetUrl(view),
       检索: `${group.title} ${group.tags.join(' ')}`,
     })))
     return buildPoseGroups(data)
@@ -144,16 +149,16 @@ export const costumesQuery = queryOptions({
       服装名称: item.title,
       标签: item.tags,
       关键词: `${item.title} ${item.tags.join(' ')}`,
-      缩略图: item.thumbnail,
-      预览图: item.original,
-      原图: item.original,
+      缩略图: item.views[0] ? assetUrl(item.views[0]) : item.thumbnail,
+      预览图: item.views[0] ? assetUrl(item.views[0]) : item.original,
+      原图: item.views[0] ? assetUrl(item.views[0]) : item.original,
       检索: `${item.title} ${item.category} ${item.tags.join(' ')}`,
       views: item.views.map((view) => ({
         id: view.id,
         label: view.label,
-        缩略图: view.thumbnail,
-        预览图: view.original,
-        原图: view.original,
+        缩略图: assetUrl(view),
+        预览图: assetUrl(view),
+        原图: assetUrl(view),
       })),
     }))
   },
@@ -176,8 +181,8 @@ export const portraitsQuery = queryOptions({
       字节数: 0,
       精选: false,
       热门: false,
-      缩略图: item.thumbnail,
-      原图: item.original,
+      缩略图: item.views[0] ? assetUrl(item.views[0]) : item.thumbnail,
+      原图: item.views[0] ? assetUrl(item.views[0]) : item.original,
       检索: `${item.title} ${item.category} ${item.hair_length} ${item.subtitle}`,
     }))
   },
