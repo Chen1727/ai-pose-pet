@@ -1,7 +1,27 @@
 import type { CostumeItem, PortraitItem, PoseItem, RecipeState } from '@/types/gallery'
 
+const PET_API_BASE = (import.meta.env.VITE_PET_API_URL || '/pet-api').replace(/\/$/, '')
+
 export function referenceImageUrl(src: string): string {
   return /^(data:|https?:\/\/|\/)/i.test(src) ? src : `/${src}`
+}
+
+/** Use the API only when a browser canvas needs a same-origin image response. */
+export function compositionImageUrl(src: string): string {
+  const normalized = referenceImageUrl(src)
+  if (/^(data:|blob:)/i.test(normalized)) return normalized
+
+  try {
+    const url = new URL(normalized, typeof window === 'undefined' ? undefined : window.location.origin)
+    const marker = '/images/'
+    const markerIndex = url.pathname.indexOf(marker)
+    if (markerIndex >= 0) {
+      return `${PET_API_BASE}${url.pathname.slice(markerIndex)}${url.search}`
+    }
+  } catch {
+    // Keep the original URL when it cannot be parsed as a browser URL.
+  }
+  return normalized
 }
 
 export function poseThumbPath(pose: PoseItem, useDepth = Boolean(pose.useDepth)): string {

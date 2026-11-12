@@ -53,7 +53,8 @@ async function fetchGallery(libraryId: string): Promise<GalleryItemResponse[]> {
 }
 
 function assetUrl(view: GalleryViewResponse): string {
-  return `/pet-api/api/gallery/assets/${view.image_id}`
+  // Gallery browsing uses the OSS URL; canvas composition applies its own API proxy.
+  return view.thumbnail || view.original
 }
 
 export function galleryFacetsQuery(libraryId: GalleryLibraryId) {

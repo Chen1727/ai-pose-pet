@@ -1,6 +1,6 @@
 import type { ApiConfig, ExtraReferenceImage, ImageProviderId, RecipeState } from '@/types/gallery'
 import { applyWorkflowOverrides, getWorkflowImages, validateReferenceCombinations, workflowIdentity, type ComfyObjectInfo } from '@/lib/comfyWorkflowParameters'
-import { poseImagePath, referenceImageUrl } from '@/lib/recipeImages'
+import { compositionImageUrl, poseImagePath, referenceImageUrl } from '@/lib/recipeImages'
 import qwen2509ThreeImageWorkflow from '@/workflows/qwen_image_edit_2509_3img.api.json'
 import qwen21PetThreeImageWorkflow from '@/workflows/qwen_image_21_pet_3img.api.json'
 import qwen21FiveImageWorkflow from '@/workflows/qwen_image_21_5img.api.json'
@@ -294,7 +294,7 @@ function loadImage(src: string): Promise<HTMLImageElement> {
     img.crossOrigin = 'anonymous'
     img.onload = () => resolve(img)
     img.onerror = () => reject(new Error(`加载图片失败: ${src}`))
-    img.src = referenceImageUrl(src)
+    img.src = compositionImageUrl(src)
   })
 }
 
