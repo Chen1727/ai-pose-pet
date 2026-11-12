@@ -40,8 +40,10 @@ const dogBreedFilters = ['玩具', '小型', '中型', '大型', '巨型', '玩�
 
 export function PetGalleryPage({ initialCategory = 'all', mode = 'all', title = '图库总览', description = '猫狗种类、宠物姿势、宠物服装和人宠互动的精选入口' }: { initialCategory?: 'all' | PetCategory; mode?: 'all' | 'breeds' | 'poses' | 'costumes' | 'interactions'; title?: string; description?: string }) {
   const { data: images } = useSuspenseQuery(petsQuery)
-  const { data: costumes } = useSuspenseQuery(costumesQuery)
-  const { data: portraits } = useSuspenseQuery(portraitsQuery)
+  // Human galleries are only needed for the overview counters. Do not block
+  // pet sub-galleries on those extra requests.
+  const { data: costumes = [] } = useQuery({ ...costumesQuery, enabled: mode === 'all' })
+  const { data: portraits = [] } = useQuery({ ...portraitsQuery, enabled: mode === 'all' })
   const facetLibrary = mode === 'breeds' ? 'pet-breeds' : mode === 'poses' ? 'pet-poses' : mode === 'costumes' ? 'pet-costumes' : mode === 'interactions' ? 'pet-interactions' : null
   const { data: facets } = useQuery({ ...galleryFacetsQuery(facetLibrary || 'pet-breeds'), enabled: Boolean(facetLibrary) })
   const { addExtraImage, recipe, setPose, replaceExtraImage, removeExtraImage } = useStudio()

@@ -13,10 +13,13 @@ export function compositionImageUrl(src: string): string {
 
   try {
     const url = new URL(normalized, typeof window === 'undefined' ? undefined : window.location.origin)
+    // OSS signs paths such as `images%2Fportraits%2F...`; decode the path
+    // before mapping it to the same-origin API image route for canvas use.
+    const pathname = decodeURIComponent(url.pathname)
     const marker = '/images/'
-    const markerIndex = url.pathname.indexOf(marker)
+    const markerIndex = pathname.indexOf(marker)
     if (markerIndex >= 0) {
-      return `${PET_API_BASE}${url.pathname.slice(markerIndex)}${url.search}`
+      return `${PET_API_BASE}${pathname.slice(markerIndex)}${url.search}`
     }
   } catch {
     // Keep the original URL when it cannot be parsed as a browser URL.

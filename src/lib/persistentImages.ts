@@ -1,9 +1,11 @@
 import type { RecipeState } from '@/types/gallery'
-import { referenceImageUrl } from './recipeImages'
+import { compositionImageUrl } from './recipeImages'
 
 export async function durableImage(url: string): Promise<string> {
   if (url.startsWith('data:image/')) return url
-  const response = await fetch(referenceImageUrl(url))
+  // Catalog images may be signed OSS URLs. Fetch them through the same-origin
+  // image route so snapshot persistence does not trigger browser CORS checks.
+  const response = await fetch(compositionImageUrl(url))
   if (!response.ok) throw new Error('图片下载失败')
   const blob = await response.blob()
   if (!blob.type.startsWith('image/')) throw new Error('引用不是图片')

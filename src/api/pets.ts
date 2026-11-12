@@ -58,8 +58,10 @@ function mapGalleryItem(item: GalleryItemResponse): PetImage {
   const views = item.views.map((view) => ({
     id: view.id,
     label: view.label,
-    thumbnail: `/pet-api/api/gallery/assets/${view.image_id}`,
-    original: `/pet-api/api/gallery/assets/${view.image_id}`,
+    // The API already returns signed OSS URLs. Keep them for gallery browsing
+    // instead of routing every image through the application server.
+    thumbnail: view.thumbnail,
+    original: view.original,
   }))
   return {
     id: item.id,

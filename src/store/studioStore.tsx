@@ -5,7 +5,7 @@ import { idbRead, idbWrite } from '@/lib/idbStorage'
 import { parseParameterWorkflow, workflowIdentity } from '@/lib/comfyWorkflowParameters'
 import { durableImage, snapshotGeneration } from '@/lib/generationSnapshot'
 import { recipeBackup } from '@/lib/recipeImages'
-import { randomSlot, type RandomScope, type ReferencePools, type ReferenceSlot } from '@/lib/randomRecipe'
+import { getReferenceGender, isLocalUpload, randomSlot, type RandomScope, type ReferencePools, type ReferenceSlot } from '@/lib/randomRecipe'
 import {
   buildRecipePrompt,
   COMFYUI_WORKFLOW_TEMPLATES,
@@ -467,12 +467,19 @@ export function StudioProvider({ children }: { children: ReactNode }) {
   }
 
   const randomizeRecipe = (pools: { portraits?: PortraitItem[]; costumes?: CostumeItem[]; poses?: PoseItem[]; pets?: PetImage[] }) => {
-    const costumePool = (pools.costumes || []).filter((c) => !c.source && c.一级分类 !== '二次元')
+    const costumePool = (pools.costumes || []).filter((c) => !isLocalUpload(c) && c.一级分类 !== '二次元')
     const portraitPool = pools.portraits || []
     const petPool = (pools.pets || []).filter((pet) => pet.kind === 'breed' && (pet.category === 'cat' || pet.category === 'dog'))
 
     setRecipe((prev) => {
-      const portrait = portraitPool.length ? randomItem(portraitPool) : prev.portrait
+      const linkedGender = getReferenceGender(prev.portrait) || getReferenceGender(prev.costume)
+      const portraitCandidates = linkedGender
+        ? portraitPool.filter((item) => getReferenceGender(item) === linkedGender)
+        : portraitPool
+      const portrait = (portraitCandidates.length ? randomItem(portraitCandidates) : portraitPool.length ? randomItem(portraitPool) : prev.portrait)
+      const costumeGender = getReferenceGender(portrait) || linkedGender
+      const matchingCostumes = costumeGender ? costumePool.filter((item) => getReferenceGender(item) === costumeGender) : costumePool
+      const selectedCostumePool = matchingCostumes.length ? matchingCostumes : costumePool
       const pet = petPool.length ? randomItem(petPool) : null
       const petView = pet?.views?.find((view) => view.id === 'front') || pet?.views?.[0]
       const petReference = pet && {
@@ -496,7 +503,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       return {
         ...prev,
         portrait,
-        costume: costumePool.length ? randomItem(costumePool) : prev.costume,
+        costume: selectedCostumePool.length ? randomItem(selectedCostumePool) : prev.costume,
         pose: posePool.length ? { ...randomItem(posePool), useDepth: false } : prev.pose,
         extraImages,
       }

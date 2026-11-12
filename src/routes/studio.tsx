@@ -145,7 +145,6 @@ function StudioPage() {
   const [randomScopes, setRandomScopes] = useState<Record<ReferenceSlot, RandomScope>>({ portrait: 'similar', costume: 'similar', pose: 'similar' })
   const [petRandomScopes, setPetRandomScopes] = useState<Record<'pet_reference' | 'pet_costume', RandomScope>>({ pet_reference: 'similar', pet_costume: 'similar' })
   const [randomizingPetSlot, setRandomizingPetSlot] = useState<'pet_reference' | 'pet_costume' | null>(null)
-  const costumeViews = recipe.costume?.views?.filter((view) => view.原图 && view.缩略图) || []
   const [showReferenceErrors, setShowReferenceErrors] = useState(false)
   const referenceErrorsRef = useRef<HTMLDivElement | null>(null)
 
@@ -728,16 +727,6 @@ function StudioPage() {
                       <div className="line-clamp-2 text-xs font-medium leading-snug" title={recipe.costume.服装名称}>
                         {recipe.costume.服装名称}
                       </div>
-                      {costumeViews.length > 0 && <Select
-                        value={costumeViews.find((view) => view.id === recipe.costume?.selectedView)?.id || costumeViews.find((view) => view.id === 'front')?.id || costumeViews[0].id}
-                        disabled={uploadingSlot !== null || randomizingSlot !== null}
-                        onValueChange={(value) => {
-                          if (recipe.costume && uploadingSlot === null && randomizingSlot === null) setCostume(selectCostumeView(recipe.costume, value))
-                        }}
-                      >
-                        <SelectTrigger aria-label="已选服装视角" className="h-8 w-full text-xs"><SelectValue /></SelectTrigger>
-                        <SelectContent>{costumeViews.map((view) => <SelectItem key={view.id} value={view.id}>{view.label}</SelectItem>)}</SelectContent>
-                      </Select>}
                     </div>
                   </>
                 ) : (
