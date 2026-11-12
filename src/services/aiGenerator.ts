@@ -288,14 +288,15 @@ export function fileToDataUrl(file: File): Promise<string> {
   })
 }
 
-function loadImage(src: string, timeoutMs = 15000): Promise<HTMLImageElement> {
+function loadImage(src: string, timeoutMs = 90000): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image()
     img.crossOrigin = 'anonymous'
+    const imageUrl = compositionImageUrl(src)
     const timer = window.setTimeout(() => {
       img.onload = null
       img.onerror = null
-      reject(new Error(`加载参考图超时，请检查图片地址或网络：${src.slice(0, 100)}`))
+      reject(new Error(`加载参考图超时，请检查图片地址或网络：${imageUrl.slice(0, 140)}`))
     }, timeoutMs)
     img.onload = () => {
       window.clearTimeout(timer)
@@ -303,9 +304,9 @@ function loadImage(src: string, timeoutMs = 15000): Promise<HTMLImageElement> {
     }
     img.onerror = () => {
       window.clearTimeout(timer)
-      reject(new Error(`加载参考图失败，请检查图片地址或网络：${src.slice(0, 100)}`))
+      reject(new Error(`加载参考图失败，请检查图片地址或网络：${imageUrl.slice(0, 140)}`))
     }
-    img.src = compositionImageUrl(src)
+    img.src = imageUrl
   })
 }
 
