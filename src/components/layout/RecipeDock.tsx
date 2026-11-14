@@ -1,10 +1,9 @@
-import { useQueryClient } from '@tanstack/react-query'
 import { Link, useLocation } from '@tanstack/react-router'
 import { CopyIcon, DicesIcon, LoaderCircleIcon, PawPrintIcon, PersonStandingIcon, ShirtIcon, SparklesIcon, Trash2Icon, UserRoundIcon, XIcon } from 'lucide-react'
 import { toast } from '@/lib/notifications'
-import { costumesQuery, portraitsQuery, posesQuery } from '@/api/gallery'
-import { petsQuery } from '@/api/pets'
-import { poseThumbPath, referenceImageUrl } from '@/lib/recipeImages'
+import { requestRandomRecipe } from '@/api/gallery'
+import type { PetImage } from '@/types/pet'
+import { poseThumbPath, referenceImageUrl, thumbnailImageUrl } from '@/lib/recipeImages'
 import { workflowIdentity } from '@/lib/comfyWorkflowParameters'
 import { Button } from '@/components/ui/button'
 import { buildRecipePrompt } from '@/services/aiGenerator'
@@ -13,7 +12,6 @@ import { useStudio } from '@/store/studioStore'
 export function RecipeDock() {
   const { pathname } = useLocation()
   const { recipe, apiConfig, isGenerating, setPortrait, setCostume, setPose, removeExtraImage, clearRecipe, randomizeRecipe } = useStudio()
-  const qc = useQueryClient()
   const extraCount = (recipe.extraImages || []).length
   const petReference = recipe.extraImages?.find((image) => image.role === 'pet_reference')
   const petCostume = recipe.extraImages?.find((image) => image.role === 'pet_costume')
@@ -26,18 +24,21 @@ export function RecipeDock() {
   }
 
   const handleRandom = async () => {
-    const [posesRes, costumes, portraits, pets] = await Promise.all([
-      qc.ensureQueryData(posesQuery),
-      qc.ensureQueryData(costumesQuery),
-      qc.ensureQueryData(portraitsQuery),
-      qc.ensureQueryData(petsQuery),
-    ])
-    randomizeRecipe({
-      poses: posesRes.items,
-      costumes,
-      portraits,
-      pets,
-    })
+    try {
+      const excludeIds: Record<string, string> = {}
+      if (recipe.portrait?.id) excludeIds.portrait = recipe.portrait.id
+      if (recipe.costume?.id) excludeIds.costume = recipe.costume.id
+      if (recipe.pose?.姿势编号 || recipe.pose?.id) excludeIds.pose = recipe.pose.姿势编号 || recipe.pose.id
+      const selected = await requestRandomRecipe({ excludeIds })
+      randomizeRecipe({
+        poses: selected.pose ? [selected.pose] : [],
+        costumes: selected.costume ? [selected.costume] : [],
+        portraits: selected.portrait ? [selected.portrait] : [],
+        pets: [selected.pet, selected.petCostume, selected.interaction].filter((item): item is PetImage => Boolean(item)),
+      })
+    } catch {
+      toast.error('随机素材加载失败，请稍后重试')
+    }
   }
 
   const handleCopyPrompt = async () => {
@@ -147,7 +148,7 @@ export function RecipeDock() {
           <div className="relative flex min-w-0 flex-col items-start gap-1.5 rounded-xl bg-muted/80 p-1.5 @md/main:flex-row @md/main:items-center sm:gap-2 sm:p-2">
             {petReference ? (
               <>
-                <img src={petReference.url} alt={petReference.name} className="h-8 w-7 shrink-0 rounded-md object-cover sm:h-10 sm:w-8" />
+                <img src={thumbnailImageUrl(petReference.thumbnailUrl || petReference.url)} alt={petReference.name} className="h-8 w-7 shrink-0 rounded-md object-cover sm:h-10 sm:w-8" />
                 <div className="min-w-0 max-w-full flex-1"><div className="truncate text-[11px] font-medium sm:text-xs">{petReference.name}</div></div>
                 <button type="button" aria-label="清除宠物参考图" onClick={() => removeExtraImage(petReference.id)} className="absolute top-1 right-1 shrink-0 rounded-full p-0.5 text-muted-foreground hover:text-foreground @md/main:static"><XIcon className="size-3" /></button>
               </>
@@ -163,7 +164,7 @@ export function RecipeDock() {
           <div className="relative flex min-w-0 flex-col items-start gap-1.5 rounded-xl bg-muted/80 p-1.5 @md/main:flex-row @md/main:items-center sm:gap-2 sm:p-2">
             {petCostume ? (
               <>
-                <img src={petCostume.url} alt={petCostume.name} className="h-8 w-7 shrink-0 rounded-md object-cover sm:h-10 sm:w-8" />
+                <img src={thumbnailImageUrl(petCostume.thumbnailUrl || petCostume.url)} alt={petCostume.name} className="h-8 w-7 shrink-0 rounded-md object-cover sm:h-10 sm:w-8" />
                 <div className="min-w-0 max-w-full flex-1"><div className="truncate text-[11px] font-medium sm:text-xs">{petCostume.name}</div></div>
                 <button type="button" aria-label="清除宠物服装参考图" onClick={() => removeExtraImage(petCostume.id)} className="absolute top-1 right-1 shrink-0 rounded-full p-0.5 text-muted-foreground hover:text-foreground @md/main:static"><XIcon className="size-3" /></button>
               </>

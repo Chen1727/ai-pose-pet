@@ -4,20 +4,22 @@ import { useMemo } from 'react'
 import { Button } from '@/components/ui/button'
 import type { PetCategory, PetImage } from '@/types/pet'
 
-export function GalleryOverview({ images, onSelect, costumeCount = 0, portraitCount = 0 }: {
+export function GalleryOverview({ images, onSelect, costumeCount = 0, portraitCount = 0, libraryCounts, recommendations: recommendedImages }: {
   images: PetImage[]
   onSelect: (image: PetImage) => void
   costumeCount?: number
   portraitCount?: number
+  libraryCounts?: { breeds: number; poses: number; costumes: number; interaction: number }
+  recommendations?: PetImage[]
 }) {
   const counts = useMemo(() => ({
-    breeds: images.filter((image) => image.kind === 'breed').length,
-    poses: images.filter((image) => image.kind === 'pose').length,
-    costumes: images.filter((image) => image.category === 'pet_costume').length,
-    interaction: images.filter((image) => image.category === 'interaction').length,
-  }), [images])
-  const allCount = images.length + costumeCount + portraitCount
-  const recommendations = useMemo(() => {
+    breeds: libraryCounts?.breeds ?? images.filter((image) => image.kind === 'breed').length,
+    poses: libraryCounts?.poses ?? images.filter((image) => image.kind === 'pose').length,
+    costumes: libraryCounts?.costumes ?? images.filter((image) => image.category === 'pet_costume').length,
+    interaction: libraryCounts?.interaction ?? images.filter((image) => image.category === 'interaction').length,
+  }), [images, libraryCounts])
+  const allCount = counts.breeds + counts.poses + counts.costumes + counts.interaction + costumeCount + portraitCount
+  const fallbackRecommendations = useMemo(() => {
     const recent = [...images].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
     const picks: PetImage[] = []
     const categories: PetCategory[] = ['cat', 'dog', 'pet_costume', 'interaction']
@@ -31,6 +33,7 @@ export function GalleryOverview({ images, onSelect, costumeCount = 0, portraitCo
     }
     return picks
   }, [images])
+  const recommendations = recommendedImages ?? fallbackRecommendations
 
   return <>
     <section className="overview-stats" aria-label="图库数量统计">

@@ -1717,7 +1717,12 @@ export async function generateCharacterImage(params: {
     throw new Error('请先选择或上传至少 1 张参考图')
   }
 
-  const model = pCfg.model === 'custom' ? pCfg.customModel.trim() : pCfg.model
+  const requestedModel = pCfg.model === 'custom' ? pCfg.customModel.trim() : pCfg.model
+  // Older saved settings may contain the Qwen-MT translation model. It is not
+  // an image model and DashScope rejects it with a generic URL error.
+  const model = provider === 'qwen' && /^qwen-mt-/i.test(requestedModel)
+    ? 'qwen-image-2.1-pro'
+    : requestedModel
   if (provider !== 'comfyui' && !model) {
     throw new Error('请选择或填写有效的模型名称')
   }
@@ -1735,6 +1740,7 @@ export async function generateCharacterImage(params: {
   const needBase64 =
     config.imagePassMode === 'base64' ||
     config.sendStitchedSheet ||
+    provider === 'qwen' ||
     (provider === 'gemini' && config.geminiParams.endpointMode === 'native') ||
     (provider === 'gpt' && config.gptParams.endpointMode === 'images_edits')
 
@@ -1742,8 +1748,13 @@ export async function generateCharacterImage(params: {
     needBase64 || isLocalOnlyImage(src) ? srcToPngDataUrl(src) : toPublicHttpsUrl(src)
   ))
 
+  // Qwen Image accepts at most three input images. Use one labeled sheet for
+  // larger recipes, and always send Base64 so private/API-proxied URLs cannot
+  // be rejected by DashScope as inaccessible image URLs.
+  const qwenNeedsSheet = provider === 'qwen' && (config.sendStitchedSheet || imageRefs.length > 3)
+  const stitchedSheet = qwenNeedsSheet || config.sendStitchedSheet ? await stitchRecipeCanvas(recipe) : null
   const allImageRefs: string[] = config.sendStitchedSheet
-    ? [...imageRefs, await stitchRecipeCanvas(recipe)]
+    ? [...imageRefs, stitchedSheet as string]
     : imageRefs
 
   let res: Response
@@ -1939,8 +1950,9 @@ export async function generateCharacterImage(params: {
       : `${baseUrl.replace(/\/api\/v1$/, '')}/api/v1/services/aigc/multimodal-generation/generation`
 
     // Qwen-Image 原生支持直接传入公网 HTTPS URL 或 Base64 Data URL: {"image": "https://..."}
+    const qwenImageRefs = qwenNeedsSheet && stitchedSheet ? [stitchedSheet] : imageRefs
     const content = [
-      ...imageRefs.map((ref) => ({ image: ref })),
+      ...qwenImageRefs.map((ref) => ({ image: ref })),
       { text: prompt },
     ]
 

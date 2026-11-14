@@ -1,10 +1,10 @@
-import { useQuery, useSuspenseQuery } from '@tanstack/react-query'
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
-import { SearchIcon, UserRoundIcon, XIcon } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { SearchIcon, UserRoundIcon, XIcon, LoaderCircleIcon } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ImageViewer } from '@/components/common/ImageViewer'
 import { PageHeader } from '@/components/common/PageHeader'
-import { galleryFacetsQuery, portraitsQuery } from '@/api/gallery'
+import { galleryFacetsQuery, portraitsInfiniteQuery } from '@/api/gallery'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useStudio } from '@/store/studioStore'
@@ -12,20 +12,18 @@ import type { PortraitItem } from '@/types/gallery'
 
 export const Route = createFileRoute('/portraits')({
   staticData: { title: '人像颜值库' },
-  loader: ({ context }) => context.queryClient.ensureQueryData(portraitsQuery),
   component: PortraitsPage,
 })
 
-const genderFilters = ['全部', '男生', '女生'] as const
-const hairFilters = ['全部', '短发', '中发', '中长发', '长发'] as const
 
 function PortraitsPage() {
-  const { data } = useSuspenseQuery(portraitsQuery)
+  const galleryQuery = useInfiniteQuery(portraitsInfiniteQuery)
+  const data = galleryQuery.data?.pages.flatMap((page) => page.items) || []
   const { data: facets } = useQuery(galleryFacetsQuery('portraits'))
   const { recipe, setPortrait } = useStudio()
   const [query, setQuery] = useState('')
-  const [gender, setGender] = useState<(typeof genderFilters)[number]>('全部')
-  const [hair, setHair] = useState<(typeof hairFilters)[number]>('全部')
+  const [gender, setGender] = useState('全部')
+  const [hair, setHair] = useState('全部')
   const [selected, setSelected] = useState<PortraitItem | null>(null)
   const filtered = useMemo(() => {
     const value = query.trim().toLocaleLowerCase('zh-CN')
@@ -35,9 +33,19 @@ function PortraitsPage() {
       return !value || `${item.标题} ${item.分区} ${item.发长} ${item.发型名称}`.toLocaleLowerCase('zh-CN').includes(value)
     })
   }, [data, gender, hair, query])
+  const genderFilters = ['全部', ...(facets?.category_options || []).filter((item) => item.category_type === 'gender').map((item) => item.name)]
+  const hairFilters = ['全部', ...(facets?.category_options || []).filter((item) => item.category_type === 'hair_length').map((item) => item.name)]
   const countFor = (filter: string, group: 'gender' | 'hair') => group === 'hair'
     ? filter === '全部' ? (facets?.total ?? data.length) : (facets?.hair_lengths[filter] ?? data.filter((item) => item.发长 === filter).length)
-    : data.filter((item) => filter === '全部' || item.分区.includes(filter)).length
+    : filter === '全部' ? (facets?.total ?? data.length) : (facets?.category_options?.find((item) => item.category_type === 'gender' && item.name === filter)?.image_count ?? 0)
+  const loadMoreRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    const target = loadMoreRef.current
+    if (!target || !galleryQuery.hasNextPage || galleryQuery.isFetchingNextPage) return
+    const observer = new IntersectionObserver((entries) => { if (entries[0]?.isIntersecting) void galleryQuery.fetchNextPage() }, { rootMargin: '480px' })
+    observer.observe(target)
+    return () => observer.disconnect()
+  }, [galleryQuery.hasNextPage, galleryQuery.isFetchingNextPage, galleryQuery.fetchNextPage])
 
   return <div className="space-y-6">
     <PageHeader title="人像颜值库" description={`当前收录 ${data.length} 张参考图`} />
@@ -61,6 +69,11 @@ function PortraitsPage() {
         </article>
       })}
     </div> : <div className="flex min-h-48 items-center justify-center text-sm text-muted-foreground">没有找到匹配的人像参考</div>}
+    <div ref={loadMoreRef} className="flex min-h-12 items-center justify-center text-sm text-muted-foreground">
+      {galleryQuery.isFetchingNextPage && <><LoaderCircleIcon className="mr-2 size-4 animate-spin" />正在加载更多…</>}
+      {!galleryQuery.isFetchingNextPage && galleryQuery.hasNextPage && <Button variant="outline" onClick={() => void galleryQuery.fetchNextPage()}>加载更多</Button>}
+      {!galleryQuery.isFetchingNextPage && !galleryQuery.hasNextPage && data.length > 0 && <span>已加载全部 {galleryQuery.data?.pages[0]?.total ?? data.length} 张</span>}
+    </div>
     <ImageViewer open={Boolean(selected)} onOpenChange={(open) => !open && setSelected(null)} imageUrl={selected?.原图 || ''} title={selected?.标题} />
   </div>
 }

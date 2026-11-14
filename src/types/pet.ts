@@ -13,6 +13,7 @@ export interface PetImage {
   title: string
   category: PetCategory
   kind?: PetGalleryKind
+  species?: 'cat' | 'dog'
   label: string
   type: string
   subtitle?: string

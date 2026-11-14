@@ -178,6 +178,13 @@ function mergeStoredConfig(raw: unknown): ApiConfig {
     { ...DEFAULT_API_CONFIG.comfyuiParams, configVersion: 1, ...obj.comfyuiParams }
   )
   const activeProvider = obj.activeProvider ?? DEFAULT_API_CONFIG.activeProvider
+  const storedQwen = { ...DEFAULT_API_CONFIG.providers.qwen, ...obj.providers?.qwen }
+  const qwenUsesLegacyTranslationModel = /^qwen-mt-/i.test(
+    storedQwen.model === 'custom' ? storedQwen.customModel.trim() : storedQwen.model
+  )
+  const qwenProvider = qwenUsesLegacyTranslationModel
+    ? { ...storedQwen, model: 'qwen-image-2.1-pro', customModel: '' }
+    : storedQwen
   // v3 起服务端 CORS 代理默认关闭，仅在切换到 Qwen / Doubao 时自动关联开启
   const useProxy =
     storedVer < 3
@@ -191,7 +198,7 @@ function mergeStoredConfig(raw: unknown): ApiConfig {
     providers: {
       gemini: { ...DEFAULT_API_CONFIG.providers.gemini, ...obj.providers?.gemini },
       gpt: { ...DEFAULT_API_CONFIG.providers.gpt, ...obj.providers?.gpt },
-      qwen: { ...DEFAULT_API_CONFIG.providers.qwen, ...obj.providers?.qwen },
+      qwen: qwenProvider,
       doubao: { ...DEFAULT_API_CONFIG.providers.doubao, ...obj.providers?.doubao },
       comfyui: comfy.provider,
     },
@@ -231,8 +238,8 @@ interface StudioContextValue {
   togglePortrait: (item: PortraitItem) => void
   toggleCostume: (item: CostumeItem) => void
   togglePose: (item: PoseItem) => void
-  addExtraImage: (item: { name: string; url: string; role?: ExtraReferenceImage['role'] }) => void
-  replaceExtraImage: (id: string, item: { name: string; url: string; role?: ExtraReferenceImage['role'] }) => void
+  addExtraImage: (item: { name: string; url: string; thumbnailUrl?: string; role?: ExtraReferenceImage['role']; sourceId?: string; species?: 'cat' | 'dog' }) => void
+  replaceExtraImage: (id: string, item: { name: string; url: string; thumbnailUrl?: string; role?: ExtraReferenceImage['role']; sourceId?: string; species?: 'cat' | 'dog' }) => void
   removeExtraImage: (id: string) => void
   updateExtraImageName: (id: string, name: string) => void
   setWorkflowImage: (nodeId: string, image: ExtraReferenceImage | null, identity: string) => void
@@ -390,7 +397,7 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     toast.success(remove ? '已移除姿势' : `已选姿势：${item.姿势名称}（${item.角度}）`)
   }
 
-  const addExtraImage = (item: { name: string; url: string; role?: ExtraReferenceImage['role'] }) => {
+  const addExtraImage = (item: { name: string; url: string; thumbnailUrl?: string; role?: ExtraReferenceImage['role']; sourceId?: string; species?: 'cat' | 'dog' }) => {
     if ((recipe.extraImages || []).length >= 2) {
       toast.error('附加参考图最多选择 2 张；合成台总参考图最多 5 张')
       return
@@ -403,7 +410,10 @@ export function StudioProvider({ children }: { children: ReactNode }) {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       name: item.name || '附加参考',
       url: item.url,
+      thumbnailUrl: item.thumbnailUrl,
       role: item.role,
+      sourceId: item.sourceId,
+      species: item.species,
     }
     setRecipe((r) => ({
       ...r,
@@ -419,10 +429,10 @@ export function StudioProvider({ children }: { children: ReactNode }) {
     }))
   }
 
-  const replaceExtraImage = (id: string, item: { name: string; url: string; role?: ExtraReferenceImage['role'] }) => {
+  const replaceExtraImage = (id: string, item: { name: string; url: string; thumbnailUrl?: string; role?: ExtraReferenceImage['role']; sourceId?: string; species?: 'cat' | 'dog' }) => {
     setRecipe((r) => ({
       ...r,
-      extraImages: (r.extraImages || []).map((image) => image.id === id ? { ...image, name: item.name, url: item.url, role: item.role } : image),
+      extraImages: (r.extraImages || []).map((image) => image.id === id ? { ...image, name: item.name, url: item.url, thumbnailUrl: item.thumbnailUrl ?? image.thumbnailUrl, role: item.role, sourceId: item.sourceId, species: item.species } : image),
     }))
   }
 
@@ -486,7 +496,10 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         id: `random-pet-${pet.id}`,
         name: pet.title,
         url: petView?.original || pet.original,
+        thumbnailUrl: petView?.thumbnail || pet.thumbnail,
         role: 'pet_reference' as const,
+        sourceId: pet.id,
+        species: pet.species,
       }
       const petCostumePool = (pools.pets || []).filter((item) => item.category === 'pet_costume' && (!pet || item.tags.includes(pet.category === 'cat' ? '猫猫' : '狗狗')))
       const petCostume = petCostumePool.length ? randomItem(petCostumePool) : null
@@ -495,7 +508,10 @@ export function StudioProvider({ children }: { children: ReactNode }) {
         id: `random-pet-costume-${petCostume.id}`,
         name: petCostume.title,
         url: petCostumeView?.original || petCostume.original,
+        thumbnailUrl: petCostumeView?.thumbnail || petCostume.thumbnail,
         role: 'pet_costume' as const,
+        sourceId: petCostume.id,
+        species: petCostume.species,
       }
       const retainedExtras = (prev.extraImages || []).filter((image) => image.role !== 'pet_reference' && image.role !== 'pet_costume')
       const extraImages = [...retainedExtras.slice(0, Math.max(0, 2 - Number(Boolean(petReference)) - Number(Boolean(petCostumeReference)))), petReference, petCostumeReference].filter(Boolean) as ExtraReferenceImage[]

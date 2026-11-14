@@ -1,53 +1,60 @@
-import { useQuery, useSuspenseQuery } from '@tanstack/react-query'
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
-import { ImagePlusIcon, SearchIcon, ShirtIcon } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { ImagePlusIcon, SearchIcon, ShirtIcon, LoaderCircleIcon } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ImageViewer } from '@/components/common/ImageViewer'
 import { PageHeader } from '@/components/common/PageHeader'
-import { costumesQuery, galleryFacetsQuery } from '@/api/gallery'
+import { costumesInfiniteQuery, galleryFacetsQuery } from '@/api/gallery'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useStudio } from '@/store/studioStore'
 import type { CostumeItem } from '@/types/gallery'
 
-const seasons = ['全部', '春季', '夏季', '秋季', '冬季'] as const
-const genders = ['全部', '女生', '男生'] as const
-
 export const Route = createFileRoute('/costumes')({
   staticData: { title: '服装穿搭库' },
-  loader: ({ context }) => context.queryClient.ensureQueryData(costumesQuery),
   component: CostumesPage,
 })
 
 function CostumesPage() {
-  const { data } = useSuspenseQuery(costumesQuery)
+  const galleryQuery = useInfiniteQuery(costumesInfiniteQuery)
+  const data = galleryQuery.data?.pages.flatMap((page) => page.items) || []
   const { data: facets } = useQuery(galleryFacetsQuery('costumes'))
   const { setCostume, recipe } = useStudio()
-  const [season, setSeason] = useState<(typeof seasons)[number]>('全部')
-  const [gender, setGender] = useState<(typeof genders)[number]>('全部')
+  const [season, setSeason] = useState('全部')
+  const [gender, setGender] = useState('全部')
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState<CostumeItem | null>(null)
   const [selectedUrl, setSelectedUrl] = useState('')
   const filtered = useMemo(() => data.filter((item) => {
     if (season !== '全部' && !`${item.分类} ${item.标签.join(' ')}`.includes(season)) return false
-    if (gender !== '全部' && (gender === '男生') !== item.标签.includes('男款')) return false
+    if (gender !== '全部' && !`${item.分类} ${item.标签.join(' ')}`.includes(gender)) return false
     return !query.trim() || `${item.服装名称} ${item.分类} ${item.标签.join(' ')} ${item.关键词}`.toLocaleLowerCase('zh-CN').includes(query.trim().toLocaleLowerCase('zh-CN'))
   }), [data, gender, query, season])
-  const seasonCounts = useMemo(() => Object.fromEntries(seasons.map((item) => [item, item === '全部' ? (facets?.total ?? data.length) : (facets?.seasons[item] ?? data.filter((costume) => `${costume.分类} ${costume.标签.join(' ')}`.includes(item)).length)])), [data, facets])
-  const genderCounts = useMemo(() => Object.fromEntries(genders.map((item) => [item, item === '全部' ? data.length : data.filter((costume) => (item === '男生') === costume.标签.includes('男款')).length])), [data])
+  const seasonOptions = ['全部', ...(facets?.category_options || []).filter((item) => item.category_type === 'season').map((item) => item.name)]
+  const genderOptions = ['全部', ...(facets?.category_options || []).filter((item) => item.category_type === 'gender').map((item) => item.name)]
+  const seasonCounts = useMemo(() => Object.fromEntries(seasonOptions.map((item) => [item, item === '全部' ? (facets?.total ?? data.length) : (facets?.seasons[item] ?? 0)])), [data.length, facets, seasonOptions])
+  const genderCounts = useMemo(() => Object.fromEntries(genderOptions.map((item) => [item, item === '全部' ? (facets?.total ?? data.length) : (facets?.category_options?.find((option) => option.category_type === 'gender' && option.name === item)?.image_count ?? 0)])), [data.length, facets, genderOptions])
+  const loadMoreRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    const target = loadMoreRef.current
+    if (!target || !galleryQuery.hasNextPage || galleryQuery.isFetchingNextPage) return
+    const observer = new IntersectionObserver((entries) => { if (entries[0]?.isIntersecting) void galleryQuery.fetchNextPage() }, { rootMargin: '480px' })
+    observer.observe(target)
+    return () => observer.disconnect()
+  }, [galleryQuery.hasNextPage, galleryQuery.isFetchingNextPage, galleryQuery.fetchNextPage])
 
   return <div className="space-y-6">
     <PageHeader title="服装穿搭库" description={`当前收录 ${data.length.toLocaleString('zh-CN')} 套参考穿搭`} />
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-2">
         <span className="w-12 text-sm font-medium">性别</span>
-        {genders.map((item) => <button key={item} type="button" onClick={() => setGender(item)} className={`shrink-0 rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${gender === item ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:text-foreground'}`}>
+        {genderOptions.map((item) => <button key={item} type="button" onClick={() => setGender(item)} className={`shrink-0 rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${gender === item ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:text-foreground'}`}>
           {item} <span className="ml-1 text-xs opacity-70">{genderCounts[item]}</span>
         </button>)}
       </div>
       <div className="flex flex-wrap items-center gap-2">
       <span className="w-12 text-sm font-medium">季节</span>
-      {seasons.map((item) => <button key={item} type="button" onClick={() => setSeason(item)} className={`shrink-0 rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${season === item ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:text-foreground'}`}>
+      {seasonOptions.map((item) => <button key={item} type="button" onClick={() => setSeason(item)} className={`shrink-0 rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${season === item ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:text-foreground'}`}>
         {item === '全部' ? '全部季节' : item} <span className="ml-1 text-xs opacity-70">{seasonCounts[item]}</span>
       </button>)}
       </div>
@@ -64,6 +71,11 @@ function CostumesPage() {
         </div>
       </article>)}
     </div> : <div className="flex min-h-48 flex-col items-center justify-center gap-2 text-center text-muted-foreground"><ShirtIcon className="size-8" /><p className="text-sm">没有找到匹配的服装参考</p></div>}
+    <div ref={loadMoreRef} className="flex min-h-12 items-center justify-center text-sm text-muted-foreground">
+      {galleryQuery.isFetchingNextPage && <><LoaderCircleIcon className="mr-2 size-4 animate-spin" />正在加载更多…</>}
+      {!galleryQuery.isFetchingNextPage && galleryQuery.hasNextPage && <Button variant="outline" onClick={() => void galleryQuery.fetchNextPage()}>加载更多</Button>}
+      {!galleryQuery.isFetchingNextPage && !galleryQuery.hasNextPage && data.length > 0 && <span>已加载全部 {galleryQuery.data?.pages[0]?.total ?? data.length} 套</span>}
+    </div>
     <ImageViewer open={Boolean(selected)} onOpenChange={(open) => !open && setSelected(null)} imageUrl={selectedUrl} title={selected?.服装名称} />
   </div>
 }

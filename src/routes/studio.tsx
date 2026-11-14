@@ -1,6 +1,5 @@
 import { ReferenceComparisonDialog } from '@/components/common/ReferenceComparisonDialog'
 import { ImageViewer } from '@/components/common/ImageViewer'
-import { useQueryClient } from '@tanstack/react-query'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import {
   ChevronDownIcon,
@@ -29,8 +28,7 @@ import {
 } from 'lucide-react'
 import { type ChangeEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from '@/lib/notifications'
-import { costumesQuery, portraitsQuery, posesQuery } from '@/api/gallery'
-import { petsQuery } from '@/api/pets'
+import { fetchGalleryItemsByIds, mapCostumeItem, mapGalleryPetItem, mapPortraitItem, mapPoseItem, requestRandomItem, requestRandomRecipe } from '@/api/gallery'
 import { Field, Section } from '@/components/common/FormSection'
 import { ComfyConnectionStatus } from '@/components/studio/ComfyConnectionStatus'
 import { WorkflowParameters } from '@/components/studio/WorkflowParameters'
@@ -58,9 +56,9 @@ import {
   stitchRecipeCanvas,
   STYLE_PRESETS,
 } from '@/services/aiGenerator'
-import { poseImagePath, poseThumbPath, referenceImageUrl, uploadedReferences } from '@/lib/recipeImages'
+import { poseImagePath, poseThumbPath, referenceImageUrl, thumbnailImageUrl, uploadedReferences } from '@/lib/recipeImages'
 import { useStudio } from '@/store/studioStore'
-import type { RandomScope, ReferenceSlot } from '@/lib/randomRecipe'
+import { getReferenceGender, type RandomScope, type ReferenceSlot } from '@/lib/randomRecipe'
 import { selectCostumeView } from '@/lib/costumeSources'
 import type {
   ComfyUiParams,
@@ -80,10 +78,6 @@ export const Route = createFileRoute('/studio')({
 })
 
 const PROVIDER_LIST: ImageProviderId[] = ['gemini', 'gpt', 'qwen', 'doubao', 'comfyui']
-
-function pickRandom<T>(items: T[]): T {
-  return items[Math.floor(Math.random() * items.length)]
-}
 
 function interactionPoseItems(images: PetImage[]) {
   return images
@@ -136,7 +130,6 @@ function StudioPage() {
   } = useStudio()
   const [comparisonResult, setComparisonResult] = useState<GenerationHistoryItem | null>(null)
   const previewResult = history.find((item) => item.imageUrl === previewUrl)
-  const qc = useQueryClient()
   const comfyFileInputRef = useRef<HTMLInputElement | null>(null)
   const slotInputRef = useRef<HTMLInputElement | null>(null)
   const uploadSlotRef = useRef<'portrait' | 'costume' | 'pose' | 'pet' | 'pet_costume'>('portrait')
@@ -153,16 +146,16 @@ function StudioPage() {
     const savedCostume = recipe.costume
     const savedUrl = savedCostume?.原图 || savedCostume?.预览图 || savedCostume?.缩略图 || ''
     const isLocalAsset = /^\/?img\//i.test(savedUrl)
-    const isCatalogAsset = savedCostume?.source === 'upload' && savedCostume.分类 !== '上传' && !savedUrl.startsWith('data:')
-    if (!hydrated || !savedCostume || (!isLocalAsset && !isCatalogAsset)) return
+    if (!hydrated || !savedCostume || !isLocalAsset || !savedCostume.id) return
     let cancelled = false
-    void qc.ensureQueryData(costumesQuery).then((items) => {
+    void fetchGalleryItemsByIds([savedCostume.id], 'costumes').then((items) => {
       if (cancelled) return
-      const match = items.find((item) => item.id === savedCostume.id || item.服装名称 === savedCostume.服装名称)
-      if (!match) {
+      const raw = items[0]
+      if (!raw) {
         if (isLocalAsset) setCostume(null)
         return
       }
+      const match = mapCostumeItem(raw)
       const currentView = savedCostume.selectedView || 'front'
       const next = selectCostumeView(match, currentView)
       if (isLocalAsset || next.原图 !== savedCostume.原图 || next.缩略图 !== savedCostume.缩略图) setCostume(next)
@@ -170,7 +163,7 @@ function StudioPage() {
       if (!cancelled) toast.error('服装参考图加载失败，请重新选择')
     })
     return () => { cancelled = true }
-  }, [hydrated, qc, recipe.costume, setCostume])
+  }, [hydrated, recipe.costume, setCostume])
 
   const activeProvider = apiConfig.activeProvider
   const providerMeta = PROVIDER_META[activeProvider]
@@ -372,28 +365,53 @@ function StudioPage() {
   const hasAnyRef = hasStitchRefs || activeWorkflowImages.length > 0
 
   const handleRandom = async () => {
-    const [posesRes, costumes, portraits, pets] = await Promise.all([
-      qc.ensureQueryData(posesQuery),
-      qc.ensureQueryData(costumesQuery),
-      qc.ensureQueryData(portraitsQuery),
-      qc.ensureQueryData(petsQuery),
-    ])
-    randomizeRecipe({
-      poses: posesRes.items,
-      costumes,
-      portraits,
-      pets,
-    })
+    try {
+      const excludeIds: Record<string, string> = {}
+      if (recipe.portrait?.id) excludeIds.portrait = recipe.portrait.id
+      if (recipe.costume?.id) excludeIds.costume = recipe.costume.id
+      if (recipe.pose?.姿势编号 || recipe.pose?.id) excludeIds.pose = recipe.pose.姿势编号 || recipe.pose.id
+      const selected = await requestRandomRecipe({
+        excludeIds,
+        gender: getReferenceGender(recipe.portrait) || getReferenceGender(recipe.costume) || undefined,
+      })
+      randomizeRecipe({
+        poses: selected.pose ? [selected.pose] : [],
+        costumes: selected.costume ? [selected.costume] : [],
+        portraits: selected.portrait ? [selected.portrait] : [],
+        pets: [selected.pet, selected.petCostume, selected.interaction].filter((item): item is PetImage => Boolean(item)),
+      })
+    } catch {
+      toast.error('随机素材加载失败，请稍后重试')
+    }
   }
 
   const handleRandomSlot = async (slot: ReferenceSlot) => {
     const expectedId = recipe[slot]?.id ?? null
     setRandomizingSlot(slot)
     try {
-      const pools = slot === 'portrait' ? { portraits: await qc.ensureQueryData(portraitsQuery) }
-        : slot === 'costume' ? { costumes: await qc.ensureQueryData(costumesQuery) }
-        : { poses: recipe.portrait && petReference ? interactionPoseItems(await qc.ensureQueryData(petsQuery)) : (await qc.ensureQueryData(posesQuery)).items }
-      randomizeSlot(slot, randomScopes[slot], pools, expectedId)
+      const linkedGender = slot === 'portrait' ? getReferenceGender(recipe.costume) : slot === 'costume' ? getReferenceGender(recipe.portrait) : undefined
+      const current = recipe[slot]
+      const similarCategory = randomScopes[slot] === 'similar'
+        ? slot === 'portrait'
+          ? recipe.portrait?.分区
+          : slot === 'costume'
+            ? recipe.costume?.分类
+            : recipe.pose?.分类
+        : undefined
+      const raw = await requestRandomItem(
+        slot === 'portrait' ? 'portraits' : slot === 'costume' ? 'costumes' : recipe.portrait && petReference ? 'pet-interactions' : 'pet-poses',
+        {
+          excludeId: current?.id,
+          category: similarCategory,
+          gender: linkedGender || undefined,
+        },
+      )
+      const pools = slot === 'portrait'
+        ? { portraits: [mapPortraitItem(raw)] }
+        : slot === 'costume'
+          ? { costumes: [mapCostumeItem(raw)] }
+          : { poses: recipe.portrait && petReference ? interactionPoseItems([mapGalleryPetItem(raw)]) : [mapPoseItem(raw)] }
+      randomizeSlot(slot, 'all', pools, expectedId)
     } catch {
       toast.error('素材库加载失败，请稍后重试')
     } finally {
@@ -405,38 +423,16 @@ function StudioPage() {
     const current = slot === 'pet_reference' ? petReference : petCostume
     setRandomizingPetSlot(slot)
     try {
-      const images = await qc.ensureQueryData(petsQuery)
-      const currentImage = current && images.find((image) => image.original === current.url || image.views?.some((view) => view.original === current.url))
-      const selectedPet = petReference && images.find((image) => image.original === petReference.url || image.views?.some((view) => view.original === petReference.url))
-      const selectedPetTag = selectedPet?.category === 'cat' ? '猫猫' : selectedPet?.category === 'dog' ? '狗狗' : null
-      const candidates = images.filter((image) => {
-        if (slot === 'pet_costume' && image.category !== 'pet_costume') return false
-        if (slot === 'pet_reference' && (image.kind !== 'breed' || (image.category !== 'cat' && image.category !== 'dog'))) return false
-        if (slot === 'pet_costume' && selectedPetTag && !image.tags.includes(selectedPetTag)) return false
-        if (currentImage && image.id === currentImage.id) return false
-        if (petRandomScopes[slot] === 'all' || !currentImage) return true
-        return slot === 'pet_reference'
-          ? image.category === currentImage.category
-          : (!selectedPetTag || image.tags.includes(selectedPetTag)) && image.type === currentImage.type
+      const selectedPetSpecies = petReference?.species
+      const raw = await requestRandomItem(slot === 'pet_reference' ? 'pet-breeds' : 'pet-costumes', {
+        species: selectedPetSpecies,
+        excludeId: current?.sourceId,
       })
-      if (!candidates.length) {
-        toast.info(petRandomScopes[slot] === 'similar' ? '没有其他同类素材，可切到“全部”再试' : '没有其他可用素材')
-        return
-      }
-      const picked = pickRandom(candidates)
+      const picked = mapGalleryPetItem(raw)
       const view = picked.views?.[0]
-      const next = { name: picked.title, url: view?.original || picked.original, role: slot as 'pet_reference' | 'pet_costume' }
+      const next = { name: picked.title, url: view?.original || picked.original, thumbnailUrl: view?.thumbnail || picked.thumbnail, role: slot as 'pet_reference' | 'pet_costume', sourceId: picked.id, species: picked.species }
       if (current) replaceExtraImage(current.id, next)
       else addExtraImage(next)
-      if (slot === 'pet_reference' && petCostume) {
-        const pickedPetTag = picked.category === 'cat' ? '猫猫' : '狗狗'
-        const matchingCostumes = images.filter((image) => image.category === 'pet_costume' && image.tags.includes(pickedPetTag) && image.original !== petCostume.url)
-        if (matchingCostumes.length) {
-          const costume = pickRandom(matchingCostumes)
-          const costumeView = costume.views?.[0]
-          replaceExtraImage(petCostume.id, { name: costume.title, url: costumeView?.original || costume.original, role: 'pet_costume' })
-        }
-      }
       toast.success(`已更换${slot === 'pet_reference' ? '宠物' : '宠物服装'}`)
     } catch {
       toast.error('宠物图库加载失败，请稍后重试')
@@ -614,7 +610,7 @@ function StudioPage() {
                       setZoomImageUrl(petReference.url)
                     }}>
                       <img
-                        src={petReference.url}
+                        src={thumbnailImageUrl(petReference.thumbnailUrl || petReference.url)}
                         alt={petReference.name}
                         className="h-12 w-10 shrink-0 rounded-lg object-cover"
                       />
@@ -664,7 +660,7 @@ function StudioPage() {
                       setZoomImageUrl(petCostume.url)
                     }}>
                       <img
-                        src={petCostume.url}
+                        src={thumbnailImageUrl(petCostume.thumbnailUrl || petCostume.url)}
                         alt={petCostume.name}
                         className="h-12 w-10 shrink-0 rounded-lg object-cover"
                       />

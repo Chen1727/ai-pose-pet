@@ -6,6 +6,20 @@ export function referenceImageUrl(src: string): string {
   return /^(data:|https?:\/\/|\/)/i.test(src) ? src : `/${src}`
 }
 
+export function thumbnailImageUrl(src: string): string {
+  if (!src || /^(data:|blob:)/i.test(src)) return src
+  try {
+    const url = new URL(referenceImageUrl(src), typeof window === 'undefined' ? 'http://localhost' : window.location.origin)
+    if (url.searchParams.get('variant') === 'original') {
+      url.searchParams.set('variant', 'thumbnail')
+      return `${url.pathname}${url.search}${url.hash}`
+    }
+  } catch {
+    // Keep non-URL asset paths unchanged.
+  }
+  return src
+}
+
 /** Use the API only when a browser canvas needs a same-origin image response. */
 export function compositionImageUrl(src: string): string {
   const normalized = referenceImageUrl(src)

@@ -72,6 +72,9 @@ export interface ExtraReferenceImage {
   id: string
   name: string
   url: string
+  thumbnailUrl?: string
+  sourceId?: string
+  species?: 'cat' | 'dog'
 }
 
 export interface RecipeState {
